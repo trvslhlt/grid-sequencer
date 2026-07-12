@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Grid Sequencer — proof harness</title>
+    <link rel="stylesheet" href="/src/main.css" />
+  </head>
+  <body>
+    <h1>Grid Sequencer — proof harness</h1>
+    <p class="note">
+      Non-UI architecture proof (build-order steps 2-6): shared clock,
+      multi-row, trigger modes, time-shift, persistent effect chains + a
+      shared reverb send. The real click-to-toggle grid UI is step 7, not
+      built yet.
+    </p>
+    <div id="unlock"></div>
+    <div id="app" class="hidden">
+      <div class="transport">
+        <button id="play-button">Play</button>
+        <button id="stop-button">Stop</button>
+        <label>
+          Step length (s)
+          <input id="step-seconds" type="range" min="0.08" max="0.6" step="0.01" value="0.18" />
+          <span id="step-seconds-value"></span>
+        </label>
+        <label>
+          Reverb send (row A)
+          <input id="reverb-send" type="range" min="0" max="1" step="0.01" value="0.15" />
+        </label>
+      </div>
+      <div id="rows"></div>
+      <button id="add-row-button">Add row C (joins at next cycle)</button>
+    </div>
+  </body>
+  <script type="module" src="/src/main.ts"></script>
+</html>
