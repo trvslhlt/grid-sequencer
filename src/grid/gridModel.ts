@@ -27,8 +27,14 @@ import {
 } from "./sourceFactory";
 import { triggerModeGate, triggerModeSourceParams } from "./triggerModes";
 
-const BUILT_INS = { note: 60, gate: 1.0, timeShiftSeconds: 0 };
-const VELOCITY = 100;
+const BUILT_INS = { note: 60, gain: 0.8, gate: 1.0, timeShiftSeconds: 0 };
+
+/** Linear 0-1 -> MIDI velocity (0-127) -- every sources/ class scales its
+ * per-voice envelope peak by velocity/127, so this is the whole
+ * implementation of "gain" at fire time (see ResolvedCellConfig.gain). */
+function gainToVelocity(gain: number): number {
+  return Math.max(0, Math.min(127, Math.round(gain * 127)));
+}
 
 const DEFAULT_SAMPLE_ADSR: AdsrParams = {
   attackMs: 5,
@@ -84,6 +90,7 @@ export class GridModel {
     this.columns = Array.from({ length: columnCount }, () => ({
       enabled: true,
       defaultNote: undefined,
+      defaultGain: undefined,
       defaultGate: undefined,
       defaultTimeShiftSeconds: undefined,
     }));
@@ -115,6 +122,7 @@ export class GridModel {
       triggerMode: { kind: "gatedToStep" },
       playbackMode: "direct",
       defaultNote: 60,
+      defaultGain: BUILT_INS.gain,
       defaultTimeShiftSeconds: 0,
       effects: [],
       reverbSend: 0,
@@ -138,6 +146,7 @@ export class GridModel {
       cells: Array.from({ length: this.columnCount }, () => ({
         on: false,
         note: undefined,
+        gain: undefined,
         gate: undefined,
         timeShiftSeconds: undefined,
         effects: undefined,
@@ -193,6 +202,11 @@ export class GridModel {
     if (runtime.config.sourceType === "samplePlayer" && note !== undefined) {
       runtime.source.setParams({ rootNote: note });
     }
+  }
+
+  setRowDefaultGain(row: Row, gain: number): void {
+    const runtime = this.findRuntime(row);
+    if (runtime) runtime.config = { ...runtime.config, defaultGain: gain };
   }
 
   setRowDefaultTimeShift(row: Row, seconds: number): void {
@@ -312,12 +326,14 @@ export class GridModel {
         this.fireSamplePlayerOverride(
           runtime,
           note,
+          resolved.gain,
           shiftedAtTime,
           gateSeconds,
           resolved.effects,
         );
       } else {
-        runtime.source.target.noteOn(note, VELOCITY, shiftedAtTime);
+        const velocity = gainToVelocity(resolved.gain);
+        runtime.source.target.noteOn(note, velocity, shiftedAtTime);
         runtime.source.target.noteOff(note, shiftedAtTime + gateSeconds);
       }
     }
@@ -336,6 +352,7 @@ export class GridModel {
   private fireSamplePlayerOverride(
     runtime: RowRuntime,
     note: number,
+    gain: number,
     atTime: number,
     gateSeconds: number,
     effects: RowConfig["effects"],
@@ -350,14 +367,20 @@ export class GridModel {
       note,
       runtime.config.defaultNote ?? BUILT_INS.note,
     );
-    const gain = this.audioContext.createGain();
-    gain.gain.value = 0;
-    source.connect(gain).connect(chain.input);
+    const gainNode = this.audioContext.createGain();
+    gainNode.gain.value = 0;
+    source.connect(gainNode).connect(chain.input);
     source.start(atTime);
 
-    triggerAttack(gain.gain, this.audioContext, DEFAULT_SAMPLE_ADSR, 1, atTime);
+    triggerAttack(
+      gainNode.gain,
+      this.audioContext,
+      DEFAULT_SAMPLE_ADSR,
+      gain,
+      atTime,
+    );
     const endTime = triggerRelease(
-      gain.gain,
+      gainNode.gain,
       this.audioContext,
       DEFAULT_SAMPLE_ADSR,
       atTime + gateSeconds,
@@ -365,7 +388,7 @@ export class GridModel {
     source.stop(endTime);
     source.onended = () => {
       source.disconnect();
-      gain.disconnect();
+      gainNode.disconnect();
       this.chainCache.release(effects);
     };
   }

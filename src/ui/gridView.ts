@@ -144,6 +144,19 @@ export function createGridView(
         },
       },
       {
+        key: "defaultGain",
+        label: "Default gain",
+        kind: "range",
+        value: row.config.defaultGain,
+        min: 0,
+        max: 1,
+        step: 0.01,
+        onChange: (v) => {
+          model.setRowDefaultGain(row, v);
+          render();
+        },
+      },
+      {
         key: "timeShift",
         label: "Default nudge (ms)",
         kind: "range",
@@ -289,6 +302,19 @@ export function createGridView(
           }),
       },
       {
+        key: "defaultGain",
+        label: "Default gain (below 0 = none)",
+        kind: "number",
+        value: column.defaultGain ?? -1,
+        min: -1,
+        max: 1,
+        step: 0.05,
+        onChange: (v) =>
+          model.setColumn(columnIndex, {
+            defaultGain: v < 0 ? undefined : v,
+          }),
+      },
+      {
         key: "defaultGate",
         label: "Default gate (0 = none)",
         kind: "number",
@@ -335,6 +361,18 @@ export function createGridView(
         step: 1,
         onChange: (v) => {
           model.setCell(row, columnIndex, { note: v < 0 ? undefined : v });
+        },
+      },
+      {
+        key: "gain",
+        label: `Gain override (inherited: ${resolved.gain.toFixed(2)})`,
+        kind: "number",
+        value: cell.gain ?? -1,
+        min: -1,
+        max: 1,
+        step: 0.05,
+        onChange: (v) => {
+          model.setCell(row, columnIndex, { gain: v < 0 ? undefined : v });
         },
       },
       {
@@ -450,6 +488,7 @@ export function createGridView(
         const cellEl = document.createElement("div");
         const overridden =
           cell.note !== undefined ||
+          cell.gain !== undefined ||
           cell.gate !== undefined ||
           cell.timeShiftSeconds !== undefined ||
           cell.effects !== undefined;

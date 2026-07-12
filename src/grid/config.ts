@@ -31,6 +31,7 @@ export interface RowConfig {
    * other source type, which are inherently pitched. */
   playbackMode: "direct" | "pitched";
   defaultNote: number | undefined;
+  defaultGain: number;
   defaultTimeShiftSeconds: number;
   /** This row's persistent effect chain, built once and never torn down
    * until the row is removed (see effectsChain.ts). */
@@ -43,6 +44,7 @@ export interface ColumnConfig {
    * regardless of any row's own cell state. */
   enabled: boolean;
   defaultNote: number | undefined;
+  defaultGain: number | undefined;
   defaultGate: number | undefined;
   defaultTimeShiftSeconds: number | undefined;
 }
@@ -51,6 +53,7 @@ export interface CellConfig {
   /** Always per-cell, never inherited from row or column. */
   on: boolean;
   note: number | undefined;
+  gain: number | undefined;
   gate: number | undefined;
   timeShiftSeconds: number | undefined;
   /** When set, replaces the row's own effect chain selection for this cell
@@ -64,6 +67,12 @@ export interface ResolvedCellConfig {
    * with the row not being muted and the column not being skipped. */
   fires: boolean;
   note: number;
+  /** Linear 0-1 multiplier, converted to a MIDI velocity (0-127) at fire
+   * time -- every sources/ class already scales its per-voice envelope
+   * peak by velocity/127 (see triggerAttack's callers), so this needs no
+   * new audio nodes or per-row/per-cell routing, unlike effects or
+   * trigger mode. */
+  gain: number;
   gate: number;
   timeShiftSeconds: number;
   effects: EffectSpec[];
@@ -71,6 +80,7 @@ export interface ResolvedCellConfig {
 
 export interface BuiltInDefaults {
   note: number;
+  gain: number;
   gate: number;
   timeShiftSeconds: number;
 }
@@ -110,6 +120,13 @@ export function resolveCellConfig(
       column.defaultNote,
       precedence,
       builtIns.note,
+    ),
+    gain: pick(
+      cell.gain,
+      row.defaultGain,
+      column.defaultGain,
+      precedence,
+      builtIns.gain,
     ),
     gate: pick(
       cell.gate,

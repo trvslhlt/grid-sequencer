@@ -98,17 +98,17 @@ Then open http://localhost:8080.
 - The grid loads with two starter rows ("Kick", a sample row; "Synth", an
   oscillator row) so it's audible immediately. Hit **Play**.
 - **Click a cell** to toggle it on/off.
-- **Right-click a cell** for its config menu: note, gate, and time-shift
-  overrides, plus (sample rows only) a custom effects chain for just that
-  cell.
+- **Right-click a cell** for its config menu: note, gain, gate, and
+  time-shift overrides, plus (sample rows only) a custom effects chain for
+  just that cell.
 - **Right-click a row label** (left column) for that row's config: source
-  type is fixed at creation, but trigger mode, default note, time-shift,
-  reverb send, its effect chain, sample loading, and per-source-type
-  params (waveform, grain density, etc.) all live here. Left-click a row
-  label to mute/unmute it.
+  type is fixed at creation, but trigger mode, default note, default gain,
+  time-shift, reverb send, its effect chain, sample loading, and
+  per-source-type params (waveform, grain density, etc.) all live here.
+  Left-click a row label to mute/unmute it.
 - **Right-click a column header** (top row) for that column's defaults
-  (note/gate/time-shift). Left-click a column header to skip that step
-  for every row.
+  (note/gain/gate/time-shift). Left-click a column header to skip that
+  step for every row.
 - **Row/column precedence** dropdown (top bar): when both a row and a
   column set a default for the same field, this picks which one wins for
   cells that don't override it themselves.
