@@ -1,0 +1,43 @@
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: grid-sequencer/Dockerfile
+      target: dev
+    ports:
+      # Host port 5175, not 5173: bruit-kit's own dev container already
+      # reserves 5173 on the host, and granular_midi (another bruit-kit
+      # sibling) already uses 5174 for the same reason.
+      - "5175:5173"
+    volumes:
+      - .:/workspace/grid-sequencer
+      # Anonymous volume so the container's own node_modules (installed for
+      # Linux, and holding the file: symlink to bruit-kit -- see below)
+      # isn't shadowed by the host bind mount above.
+      - /workspace/grid-sequencer/node_modules
+      # Sibling package (package.json depends on it via
+      # "file:../bruit-kit", relative to /workspace/grid-sequencer) --
+      # read-only since this container only consumes it, never builds it.
+      # bruit-kit owns its own Docker setup (see ../bruit-kit/Makefile);
+      # `make up` here shells into it first (see this project's Makefile)
+      # so dist/ is fresh before this container starts.
+      - ../bruit-kit:/workspace/bruit-kit:ro
+
+  # Manual verification only (not CI) -- drives the running app with a real
+  # (headless) browser. Run with `make verify`.
+  verify:
+    image: mcr.microsoft.com/playwright:v1.61.1-noble
+    profiles:
+      - tools
+    working_dir: /work
+    volumes:
+      - ./tests:/work
+      - /work/node_modules
+    # Shares the app container's network namespace (rather than reaching it
+    # by Compose service name) so BASE_URL can be http://localhost:5173.
+    network_mode: "service:app"
+    environment:
+      - BASE_URL=http://localhost:5173
+    depends_on:
+      - app
+    command: sh -c "npm install >/dev/null 2>&1 && npm run verify"

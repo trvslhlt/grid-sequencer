@@ -1,3 +1,5 @@
+import { ReverbEffect, createSend } from "bruit-kit/audio";
+import type { Send } from "bruit-kit/audio";
 import { createStepClock } from "bruit-kit/midi";
 import type { StepClock } from "bruit-kit/midi";
 import {
@@ -6,12 +8,6 @@ import {
   triggerAttack,
   triggerRelease,
 } from "bruit-kit/sources";
-import { ReverbEffect, createSend } from "bruit-kit/audio";
-import type { Send } from "bruit-kit/audio";
-import {
-  type BuiltEffectsChain,
-  createEffectsChainCache,
-} from "./effectsChain";
 import {
   type CellConfig,
   type ColumnConfig,
@@ -20,7 +16,15 @@ import {
   type RowConfig,
   resolveCellConfig,
 } from "./config";
-import { type RowSource, type SourceType, createRowSource } from "./sourceFactory";
+import {
+  type BuiltEffectsChain,
+  createEffectsChainCache,
+} from "./effectsChain";
+import {
+  type RowSource,
+  type SourceType,
+  createRowSource,
+} from "./sourceFactory";
 import { triggerModeGate, triggerModeSourceParams } from "./triggerModes";
 
 const BUILT_INS = { note: 60, gate: 1.0, timeShiftSeconds: 0 };

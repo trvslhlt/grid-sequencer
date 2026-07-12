@@ -1,7 +1,10 @@
-import type { GridModel, Row } from "../grid/gridModel";
 import type { EffectSpec } from "../grid/config";
+import type { GridModel, Row } from "../grid/gridModel";
 import { SOURCE_TYPE_LABELS } from "../grid/sourceFactory";
-import { TRIGGER_MODE_LABELS, type TriggerModeKind } from "../grid/triggerModes";
+import {
+  TRIGGER_MODE_LABELS,
+  type TriggerModeKind,
+} from "../grid/triggerModes";
 import { type MenuField, openContextMenu } from "./contextMenu";
 
 /** filter+delay is the one persistent-chain shape this UI exposes (see
@@ -30,7 +33,9 @@ function effectsDelayWet(effects: EffectSpec[]): number {
 
 function withFilterFreq(effects: EffectSpec[], freq: number): EffectSpec[] {
   return effects.map((e) =>
-    e.type === "filter" ? { ...e, params: { ...e.params, frequency: freq } } : e,
+    e.type === "filter"
+      ? { ...e, params: { ...e.params, frequency: freq } }
+      : e,
   );
 }
 
@@ -233,7 +238,8 @@ export function createGridView(
           input.addEventListener("change", async () => {
             const file = input.files?.[0];
             if (!file) return;
-            const audioContext = (row.source.output as AudioNode).context as AudioContext;
+            const audioContext = (row.source.output as AudioNode)
+              .context as AudioContext;
             const arrayBuffer = await file.arrayBuffer();
             const buffer = await audioContext.decodeAudioData(arrayBuffer);
             await model.loadRowSample(row, buffer);
@@ -388,7 +394,12 @@ export function createGridView(
       }
     }
 
-    openContextMenu(x, y, `Cell: row ${row.config.name}, col ${columnIndex + 1}`, fields);
+    openContextMenu(
+      x,
+      y,
+      `Cell: row ${row.config.name}, col ${columnIndex + 1}`,
+      fields,
+    );
   }
 
   function render(): void {

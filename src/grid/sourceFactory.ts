@@ -1,3 +1,4 @@
+import type { NoteTarget } from "bruit-kit/midi";
 import {
   FmSynth,
   GranularSynth,
@@ -5,7 +6,6 @@ import {
   OscillatorSynth,
   SamplePlayer,
 } from "bruit-kit/sources";
-import type { NoteTarget } from "bruit-kit/midi";
 
 export type SourceType =
   | "samplePlayer"
@@ -56,9 +56,7 @@ function toRowSource<T extends NoteTarget & { output: AudioNode }>(
   instance: T,
   setParams: (params: Record<string, unknown>) => void,
   paramFields: ParamField[],
-  extra: Partial<
-    Pick<RowSource, "needsSample" | "loadSample" | "init">
-  > = {},
+  extra: Partial<Pick<RowSource, "needsSample" | "loadSample" | "init">> = {},
 ): RowSource {
   return {
     target: instance,
@@ -78,15 +76,10 @@ export function createRowSource(
   switch (type) {
     case "samplePlayer": {
       const player = new SamplePlayer(audioContext);
-      return toRowSource(
-        player,
-        (p) => player.setParams(p),
-        [],
-        {
-          needsSample: true,
-          loadSample: (buffer) => player.loadSample(buffer),
-        },
-      );
+      return toRowSource(player, (p) => player.setParams(p), [], {
+        needsSample: true,
+        loadSample: (buffer) => player.loadSample(buffer),
+      });
     }
     case "oscillatorSynth": {
       const synth = new OscillatorSynth(audioContext);

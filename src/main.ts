@@ -1,9 +1,9 @@
 import { getSharedLimiter, unlockAudioContext } from "./audioContext";
-import { generateBlipBuffer } from "./sampleGen";
+import type { Precedence } from "./grid/config";
 import { GridModel } from "./grid/gridModel";
 import { SOURCE_TYPE_LABELS, type SourceType } from "./grid/sourceFactory";
+import { generateBlipBuffer } from "./sampleGen";
 import { createGridView } from "./ui/gridView";
-import type { Precedence } from "./grid/config";
 
 const COLUMN_COUNT = 8;
 
@@ -12,18 +12,18 @@ const appEl = document.querySelector<HTMLDivElement>("#app")!;
 const gridEl = document.querySelector<HTMLDivElement>("#grid")!;
 const playButtonEl = document.querySelector<HTMLButtonElement>("#play-button")!;
 const stopButtonEl = document.querySelector<HTMLButtonElement>("#stop-button")!;
-const stepSecondsEl = document.querySelector<HTMLInputElement>("#step-seconds")!;
+const stepSecondsEl =
+  document.querySelector<HTMLInputElement>("#step-seconds")!;
 const stepSecondsValueEl = document.querySelector<HTMLSpanElement>(
   "#step-seconds-value",
 )!;
-const precedenceSelectEl = document.querySelector<HTMLSelectElement>(
-  "#precedence-select",
-)!;
-const newRowTypeEl = document.querySelector<HTMLSelectElement>("#new-row-type")!;
+const precedenceSelectEl =
+  document.querySelector<HTMLSelectElement>("#precedence-select")!;
+const newRowTypeEl =
+  document.querySelector<HTMLSelectElement>("#new-row-type")!;
 const newRowNameEl = document.querySelector<HTMLInputElement>("#new-row-name")!;
-const addRowButtonEl = document.querySelector<HTMLButtonElement>(
-  "#add-row-button",
-)!;
+const addRowButtonEl =
+  document.querySelector<HTMLButtonElement>("#add-row-button")!;
 
 for (const type of Object.keys(SOURCE_TYPE_LABELS) as SourceType[]) {
   const option = document.createElement("option");
@@ -40,7 +40,12 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
   stepSecondsValueEl.textContent = stepSeconds.toFixed(2);
 
   const limiter = getSharedLimiter(audioContext);
-  const model = new GridModel(audioContext, limiter.input, COLUMN_COUNT, stepSeconds);
+  const model = new GridModel(
+    audioContext,
+    limiter.input,
+    COLUMN_COUNT,
+    stepSeconds,
+  );
   const view = createGridView(gridEl, model);
 
   async function addRow(
