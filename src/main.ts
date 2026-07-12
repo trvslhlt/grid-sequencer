@@ -141,6 +141,13 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
     model.precedence = precedenceSelectEl.value as Precedence;
   });
 
+  // LimiterEffect has no getter for its own params (setParams only), so
+  // this app tracks the current values itself -- matching its constructor
+  // defaults -- to show the real current value each time the panel reopens
+  // rather than resetting the sliders to a hardcoded default every time.
+  let limiterCeiling = -1;
+  let limiterRelease = 0.1;
+
   masterButtonEl.addEventListener("click", () => {
     const rect = masterButtonEl.getBoundingClientRect();
     openContextMenu(rect.left, rect.bottom, "Master", [
@@ -161,21 +168,27 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
         key: "limiterCeiling",
         label: "Limiter ceiling (dB)",
         kind: "range",
-        value: -1,
+        value: limiterCeiling,
         min: -12,
         max: 0,
         step: 0.5,
-        onChange: (v) => limiter.setParams({ ceiling: v }),
+        onChange: (v) => {
+          limiterCeiling = v;
+          limiter.setParams({ ceiling: v });
+        },
       },
       {
         key: "limiterRelease",
         label: "Limiter release (s)",
         kind: "range",
-        value: 0.1,
+        value: limiterRelease,
         min: 0.01,
         max: 1,
         step: 0.01,
-        onChange: (v) => limiter.setParams({ release: v }),
+        onChange: (v) => {
+          limiterRelease = v;
+          limiter.setParams({ release: v });
+        },
       },
     ]);
   });

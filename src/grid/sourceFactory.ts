@@ -44,6 +44,11 @@ export interface RowSource {
   target: NoteTarget;
   output: AudioNode;
   setParams(params: Record<string, unknown>): void;
+  /** The underlying sources/ classes are setParams-only (no getter), so
+   * this is this wrapper's own tracked copy -- otherwise a param menu
+   * would have no way to show its *current* value rather than always
+   * falling back to paramFields' static default on every reopen. */
+  getParams(): Record<string, unknown>;
   paramFields: ParamField[];
   needsSample: boolean;
   loadSample?(buffer: AudioBuffer): void | Promise<void>;
@@ -54,14 +59,23 @@ export interface RowSource {
 
 function toRowSource<T extends NoteTarget & { output: AudioNode }>(
   instance: T,
-  setParams: (params: Record<string, unknown>) => void,
+  applyParams: (params: Record<string, unknown>) => void,
   paramFields: ParamField[],
   extra: Partial<Pick<RowSource, "needsSample" | "loadSample" | "init">> = {},
 ): RowSource {
+  const currentParams: Record<string, unknown> = Object.fromEntries(
+    paramFields.map((field) => [field.key, field.default]),
+  );
   return {
     target: instance,
     output: instance.output,
-    setParams,
+    setParams(params) {
+      Object.assign(currentParams, params);
+      applyParams(params);
+    },
+    getParams() {
+      return { ...currentParams };
+    },
     paramFields,
     needsSample: extra.needsSample ?? false,
     loadSample: extra.loadSample,

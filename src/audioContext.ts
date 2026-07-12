@@ -37,10 +37,3 @@ export function getSharedLimiter(audioContext: AudioContext): LimiterEffect {
   }
   return limiter;
 }
-
-export function connectToOutput(
-  node: AudioNode,
-  audioContext: AudioContext,
-): void {
-  node.connect(getSharedLimiter(audioContext).input);
-}

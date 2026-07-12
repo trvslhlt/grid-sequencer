@@ -138,7 +138,10 @@ export function createGridView(
         label: "Name",
         kind: "text",
         value: row.config.name,
-        onChange: () => {}, // display-only in this proof UI; renamed rows aren't a modeled operation yet
+        onChange: (v) => {
+          model.setRowName(row, v);
+          render();
+        },
       },
       {
         key: "enabled",
@@ -248,11 +251,14 @@ export function createGridView(
         key: "reverbSend",
         label: "Reverb send",
         kind: "range",
-        value: 0,
+        value: row.config.reverbSend,
         min: 0,
         max: 1,
         step: 0.01,
-        onChange: (v) => model.setRowReverbSend(row, v),
+        onChange: (v) => {
+          model.setRowReverbSend(row, v);
+          render();
+        },
       },
       ...effectsToggleFields(row.config.effects, (next) => {
         model.setRowEffects(row, next);
@@ -260,13 +266,15 @@ export function createGridView(
       }),
     );
 
+    const sourceParams = row.source.getParams();
     for (const field of row.source.paramFields) {
+      const current = sourceParams[field.key] ?? field.default;
       if (field.kind === "select") {
         fields.push({
           key: field.key,
           label: field.label,
           kind: "select",
-          value: String(field.default),
+          value: String(current),
           options: field.options ?? [],
           onChange: (v) => row.source.setParams({ [field.key]: v }),
         });
@@ -275,7 +283,7 @@ export function createGridView(
           key: field.key,
           label: field.label,
           kind: "range",
-          value: Number(field.default),
+          value: Number(current),
           min: field.min ?? 0,
           max: field.max ?? 1,
           step: field.step ?? 0.01,
@@ -406,6 +414,7 @@ export function createGridView(
         step: 1,
         onChange: (v) => {
           model.setCell(row, columnIndex, { note: v < 0 ? undefined : v });
+          render();
         },
       },
       {
@@ -418,6 +427,7 @@ export function createGridView(
         step: 0.05,
         onChange: (v) => {
           model.setCell(row, columnIndex, { gain: v < 0 ? undefined : v });
+          render();
         },
       },
       {
@@ -430,6 +440,7 @@ export function createGridView(
         step: 0.05,
         onChange: (v) => {
           model.setCell(row, columnIndex, { gate: v <= 0 ? undefined : v });
+          render();
         },
       },
       {
@@ -442,6 +453,7 @@ export function createGridView(
         step: 5,
         onChange: (v) => {
           model.setCell(row, columnIndex, { timeShiftSeconds: v / 1000 });
+          render();
         },
       },
     ];

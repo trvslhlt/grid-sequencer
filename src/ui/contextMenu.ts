@@ -103,10 +103,16 @@ function renderField(container: HTMLElement, field: MenuField): void {
   } else {
     const input = document.createElement("input");
     input.type = field.kind === "range" ? "range" : "number";
-    input.value = String(field.value);
+    // min/max/step *before* value: a range/number input's value-setting
+    // algorithm clamps to whatever min/max/step are in effect at that
+    // moment, and the browser defaults (min 0, max 100, step 1) are still
+    // active until these are set -- assigning value first would silently
+    // snap any fractional value (e.g. a 0-1 gain) to the nearest whole
+    // number before this field's real constraints ever apply.
     if (field.min !== undefined) input.min = String(field.min);
     if (field.max !== undefined) input.max = String(field.max);
     if (field.step !== undefined) input.step = String(field.step);
+    input.value = String(field.value);
     input.addEventListener("input", () => field.onChange(Number(input.value)));
     row.appendChild(input);
   }
@@ -141,10 +147,14 @@ export function openContextMenu(
   document.body.appendChild(menu);
   openMenuEl = menu;
 
-  // Safe to attach immediately, no deferral needed: menus only ever open
-  // via a "contextmenu" event, and these listeners close on "click" /
-  // "keydown" -- different event types, so there's no same-tick collision
-  // with the event that opened this menu.
+  // Safe to attach immediately, no deferral needed: this runs synchronously
+  // inside whatever handler opened the menu (a cell/row/column's
+  // "contextmenu", or the Master button's plain "click"). By the time that
+  // handler is running, the current event's capture phase at `document`
+  // has already completed, so a capture-phase listener added here won't
+  // be invoked for the very click/contextmenu that's still in flight --
+  // only for the next one. Verified via the Master button specifically
+  // (a same-type "click" open), not just the different-event-type case.
   document.addEventListener("click", onOutsideClick, true);
   document.addEventListener("keydown", onKeyDown, true);
 }

@@ -247,6 +247,13 @@ export class GridModel {
     const runtime = this.findRuntime(row);
     if (!runtime) return;
     runtime.source.output.disconnect();
+    // The chain may still be shared with another row (same effective
+    // config), so only sever this row's own edge into it rather than a
+    // blanket chain.output.disconnect() -- that would silence the other
+    // row's dry path too. chainCache.release only tears the chain down
+    // once nothing else references it.
+    runtime.chain.output.disconnect(runtime.send.input);
+    runtime.send.input.disconnect();
     this.chainCache.release(runtime.config.effects);
     this.rows.splice(this.rows.indexOf(runtime), 1);
   }
@@ -261,6 +268,11 @@ export class GridModel {
   setRowEnabled(row: Row, enabled: boolean): void {
     const runtime = this.findRuntime(row);
     if (runtime) runtime.config = { ...runtime.config, enabled };
+  }
+
+  setRowName(row: Row, name: string): void {
+    const runtime = this.findRuntime(row);
+    if (runtime) runtime.config = { ...runtime.config, name };
   }
 
   setRowTriggerMode(row: Row, triggerMode: RowConfig["triggerMode"]): void {
@@ -299,7 +311,10 @@ export class GridModel {
   }
 
   setRowReverbSend(row: Row, level: number): void {
-    this.findRuntime(row)?.send.setLevel(level);
+    const runtime = this.findRuntime(row);
+    if (!runtime) return;
+    runtime.send.setLevel(level);
+    runtime.config = { ...runtime.config, reverbSend: level };
   }
 
   /** Re-acquires the cache entry for the *new* effects config before
@@ -310,10 +325,16 @@ export class GridModel {
     const runtime = this.findRuntime(row);
     if (!runtime) return;
     const oldEffects = runtime.config.effects;
+    const oldChain = runtime.chain;
     const newChain = this.chainCache.acquire(effects);
     runtime.source.output.disconnect();
     runtime.source.output.connect(newChain.input);
-    runtime.send.input.disconnect();
+    // Sever only the old chain's own edge into this row's send tap -- not
+    // send.input.disconnect(), which would sever send.input's *outgoing*
+    // edge to the reverb bus instead and silently kill this row's reverb
+    // send for good (the old chain might still be shared with another
+    // row, so a blanket oldChain.output.disconnect() isn't safe either).
+    oldChain.output.disconnect(runtime.send.input);
     newChain.output.connect(runtime.send.input);
     this.chainCache.release(oldEffects);
     runtime.config = { ...runtime.config, effects };

@@ -44,6 +44,29 @@ const columnCount = await page.locator(".column-master").count();
 if (columnCount !== 8) fail(`expected 8 columns, found ${columnCount}`);
 else ok("8 columns loaded");
 
+// Regression: contextMenu.ts's renderField used to set a range/number
+// input's value *before* its min/max/step, so the browser's default
+// constraints (min 0, max 100, step 1) would silently round any
+// fractional value -- a fresh row's 0.8 default gain became 1 on its very
+// first render, before any onChange ever fired. Checking a never-touched
+// row's default catches that class of bug specifically (not just values
+// this script itself later sets).
+await page
+  .locator(".row-master", { hasText: "Kick" })
+  .click({ button: "right" });
+await page.waitForSelector(".context-menu");
+const freshGain = await page
+  .locator(".menu-field", { hasText: "Default gain" })
+  .locator("input[type=range]")
+  .inputValue();
+if (Number(freshGain) !== 0.8) {
+  fail(`fresh row's default gain should render as 0.8, got ${freshGain}`);
+} else {
+  ok("fractional default values render uncorrupted");
+}
+await page.mouse.click(10, 10);
+await page.waitForTimeout(50);
+
 // Cell toggle.
 const firstCell = page.locator(".cell").first();
 const before = (await firstCell.getAttribute("class")) ?? "";
@@ -100,6 +123,58 @@ if ((await page.locator(".context-menu").count()) !== 0) {
 } else {
   ok("row-master context menu opens and closes");
 }
+
+// Regression: renaming a row, setting its reverb send, and adjusting a
+// per-source-type param (Detune, on the oscillator "Synth" row) must all
+// persist and show the *current* value next time the menu reopens --
+// these previously fell back to a hardcoded/static value instead.
+const synthRow = page.locator(".row-master", { hasText: "Synth" });
+await synthRow.click({ button: "right" });
+await page.waitForSelector(".context-menu");
+await page
+  .locator(".menu-field", { hasText: "Name" })
+  .locator("input[type=text]")
+  .fill("Lead");
+await page
+  .locator(".menu-field", { hasText: "Reverb send" })
+  .locator("input[type=range]")
+  .fill("0.42");
+await page
+  .locator(".menu-field", { hasText: "Detune" })
+  .locator("input[type=range]")
+  .fill("37");
+await page.keyboard.press("Tab"); // commit the text input's "change" event
+await page.mouse.click(10, 10);
+await page.waitForTimeout(100);
+
+const renamedRow = page.locator(".row-master", { hasText: "Lead" });
+if ((await renamedRow.count()) === 0) {
+  fail("row rename did not persist to the grid label");
+} else {
+  ok("row rename persists");
+}
+await renamedRow.click({ button: "right" });
+await page.waitForSelector(".context-menu");
+const reverbSendValue = await page
+  .locator(".menu-field", { hasText: "Reverb send" })
+  .locator("input[type=range]")
+  .inputValue();
+const detuneValue = await page
+  .locator(".menu-field", { hasText: "Detune" })
+  .locator("input[type=range]")
+  .inputValue();
+if (Number(reverbSendValue) < 0.4) {
+  fail(`reverb send did not persist: expected ~0.42, got ${reverbSendValue}`);
+} else {
+  ok("reverb send value persists across menu reopen");
+}
+if (Number(detuneValue) !== 37) {
+  fail(`Detune did not persist: expected 37, got ${detuneValue}`);
+} else {
+  ok("source param value persists across menu reopen");
+}
+await page.mouse.click(10, 10);
+await page.waitForTimeout(50);
 
 // Column-master toggle (skip-this-step-for-every-row) via left click.
 const firstColumn = page.locator(".column-master").first();
