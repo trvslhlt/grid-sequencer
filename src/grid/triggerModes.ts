@@ -7,6 +7,14 @@ export type TriggerMode =
   | { kind: "gatedToStep" }
   | { kind: "explicitDuration"; seconds: number; loop: boolean };
 
+export type TriggerModeKind = TriggerMode["kind"];
+
+export const TRIGGER_MODE_LABELS: Record<TriggerModeKind, string> = {
+  oneShotSample: "One-shot (to end of sample)",
+  gatedToStep: "Gated to step",
+  explicitDuration: "Explicit duration",
+};
+
 export interface TriggerModeSourceParams {
   oneShot: boolean;
   loop: boolean;

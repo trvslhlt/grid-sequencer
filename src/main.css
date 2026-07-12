@@ -3,7 +3,7 @@ body {
   background: #16171b;
   color: #e4e6eb;
   padding: 1.5rem;
-  max-width: 760px;
+  max-width: 900px;
   margin: 0 auto;
 }
 
@@ -37,28 +37,59 @@ button:hover {
   background: #3a3e47;
 }
 
-.row {
-  margin-bottom: 1.25rem;
-  border: 1px solid #2a2d34;
-  border-radius: 6px;
-  padding: 0.75rem;
+select,
+input[type="text"],
+input[type="number"] {
+  background: #2a2d34;
+  color: #e4e6eb;
+  border: 1px solid #3a3e47;
+  border-radius: 4px;
+  padding: 0.2rem 0.4rem;
 }
 
-.row-header {
+.add-row {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 1rem;
+  align-items: center;
+}
+
+.grid-table {
+  display: grid;
+  gap: 4px;
+  align-items: center;
+}
+
+.grid-corner {
+  width: 120px;
+}
+
+.master-cell {
+  height: 34px;
   display: flex;
   align-items: center;
-  gap: 1rem;
-  margin-bottom: 0.5rem;
-  flex-wrap: wrap;
+  justify-content: center;
+  cursor: pointer;
+  border-radius: 4px;
+  background: #33384a;
+  color: #e4e6eb;
+  border: 1px solid #454b60;
+  font-size: 0.75rem;
+  user-select: none;
+  padding: 0 0.4rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.row-header strong {
-  min-width: 6ch;
+.master-cell.off {
+  background: #2a2d34;
+  color: #6a6f7a;
+  text-decoration: line-through;
 }
 
-.cells {
-  display: flex;
-  gap: 4px;
+.row-master {
+  justify-content: flex-start;
 }
 
 .cell {
@@ -80,19 +111,53 @@ button:hover {
   background: #4c7dff;
 }
 
+.cell.overridden {
+  border-color: #ffb454;
+}
+
 .cell.playhead {
   box-shadow: 0 0 0 2px #ffb454;
 }
 
-.row-status {
-  font-size: 0.8rem;
+.context-menu {
+  position: fixed;
+  z-index: 1000;
+  background: #21232a;
+  border: 1px solid #3a3e47;
+  border-radius: 6px;
+  padding: 0.6rem;
+  min-width: 220px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+
+.menu-title {
+  font-weight: 600;
+  font-size: 0.85rem;
+  margin-bottom: 0.5rem;
   color: #ffb454;
 }
 
-select {
-  background: #2a2d34;
-  color: #e4e6eb;
-  border: 1px solid #3a3e47;
-  border-radius: 4px;
-  padding: 0.2rem;
+.menu-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.4rem;
+  font-size: 0.8rem;
+}
+
+.menu-field label {
+  flex-shrink: 0;
+}
+
+.menu-field input[type="range"] {
+  width: 100px;
+}
+
+.menu-field input[type="number"] {
+  width: 4.5rem;
+}
+
+.menu-field button {
+  width: 100%;
 }

@@ -1,40 +1,119 @@
-import { DelayEffect, FilterEffect, chainEffects, createSend } from "bruit-kit/audio";
+import {
+  CompressorEffect,
+  DelayEffect,
+  DistortionEffect,
+  FilterEffect,
+  RingModulationEffect,
+  TremoloEffect,
+  chainEffects,
+} from "bruit-kit/audio";
+import type { ChainableNode } from "bruit-kit/audio";
+import type { EffectSpec } from "./config";
 
-/** One row's persistent insert chain: built once and connected here, never
- * torn down until the row itself is deleted -- a fresh source just
- * connect()s into `input` on each hit (see PLAN.md's Effects section for
- * why persistent beats per-hit chains: the chain's own state, e.g. delay
- * feedback, keeps evolving between hits like a real mixer insert). The
- * dry path goes straight to `dryDestination`; a separate send tap feeds a
- * variable amount into the shared reverb bus without duplicating the
- * (expensive) convolver per row. */
-export interface RowEffectsChain {
-  readonly input: AudioNode;
-  readonly filter: FilterEffect;
-  readonly delay: DelayEffect;
-  setReverbSend(level: number): void;
+function instantiateEffect(
+  audioContext: AudioContext,
+  spec: EffectSpec,
+): ChainableNode {
+  switch (spec.type) {
+    case "filter": {
+      const fx = new FilterEffect(audioContext);
+      fx.setParams({ wet: 1, ...spec.params });
+      return fx;
+    }
+    case "delay": {
+      const fx = new DelayEffect(audioContext);
+      fx.setParams({ wet: 1, ...spec.params });
+      return fx;
+    }
+    case "distortion": {
+      const fx = new DistortionEffect(audioContext);
+      fx.setParams({ wet: 1, ...spec.params });
+      return fx;
+    }
+    case "compressor": {
+      const fx = new CompressorEffect(audioContext);
+      fx.setParams({ wet: 1, ...spec.params });
+      return fx;
+    }
+    case "tremolo": {
+      const fx = new TremoloEffect(audioContext);
+      fx.setParams({ wet: 1, ...spec.params });
+      return fx;
+    }
+    case "ringMod": {
+      const fx = new RingModulationEffect(audioContext);
+      fx.setParams({ wet: 1, ...spec.params });
+      return fx;
+    }
+  }
 }
 
-export function createRowEffectsChain(
+/** A single distinct effective effects config (see PLAN.md's Effects
+ * section: node count is bounded by *distinct effective configs*, not
+ * grid size). `dispose()` only tears down the chain's own nodes -- callers
+ * are responsible for not calling it while anything still references this
+ * chain (the cache below ref-counts so that's automatic). */
+export interface BuiltEffectsChain extends ChainableNode {
+  dispose(): void;
+}
+
+export function buildEffectsChain(
   audioContext: AudioContext,
-  dryDestination: AudioNode,
-  reverbBusInput: AudioNode,
-  initialReverbSend = 0,
-): RowEffectsChain {
-  const filter = new FilterEffect(audioContext);
-  const delay = new DelayEffect(audioContext);
-  const chain = chainEffects(audioContext, [filter, delay]);
-  chain.output.connect(dryDestination);
-
-  const send = createSend(audioContext, reverbBusInput, initialReverbSend);
-  chain.output.connect(send.input);
-
+  specs: EffectSpec[],
+): BuiltEffectsChain {
+  const nodes = specs.map((spec) => instantiateEffect(audioContext, spec));
+  const chain = chainEffects(audioContext, nodes);
   return {
     input: chain.input,
-    filter,
-    delay,
-    setReverbSend(level) {
-      send.setLevel(level);
+    output: chain.output,
+    dispose() {
+      chain.input.disconnect();
+      chain.output.disconnect();
+    },
+  };
+}
+
+/** Caches persistent chains by their effects config so two rows/cells that
+ * resolve to the identical effective config (the common case -- most cells
+ * inherit their row's chain untouched) share one chain instance instead of
+ * building a duplicate. Ref-counted so a chain is torn down once nothing
+ * references it any more (a row deleted, or a cell's override cleared). */
+export interface EffectsChainCache {
+  acquire(specs: EffectSpec[]): BuiltEffectsChain;
+  release(specs: EffectSpec[]): void;
+}
+
+export function createEffectsChainCache(
+  audioContext: AudioContext,
+  dryDestination: AudioNode,
+): EffectsChainCache {
+  const entries = new Map<
+    string,
+    { chain: BuiltEffectsChain; refCount: number }
+  >();
+
+  return {
+    acquire(specs) {
+      const key = JSON.stringify(specs);
+      const existing = entries.get(key);
+      if (existing) {
+        existing.refCount++;
+        return existing.chain;
+      }
+      const chain = buildEffectsChain(audioContext, specs);
+      chain.output.connect(dryDestination);
+      entries.set(key, { chain, refCount: 1 });
+      return chain;
+    },
+    release(specs) {
+      const key = JSON.stringify(specs);
+      const entry = entries.get(key);
+      if (!entry) return;
+      entry.refCount--;
+      if (entry.refCount <= 0) {
+        entry.chain.dispose();
+        entries.delete(key);
+      }
     },
   };
 }
