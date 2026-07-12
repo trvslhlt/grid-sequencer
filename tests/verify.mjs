@@ -1,8 +1,8 @@
 // Manual (non-CI) golden-path browser check: unlock audio, toggle cells,
-// open every context-menu kind (cell/row-master/column-master), add one of
-// each of the 5 source types (GranularSynth exercises its async worklet
-// init), flip row/column precedence, and play -- all with zero console
-// errors.
+// select each panel kind (cell/row/column/master) and exercise its
+// override fields, add one of each of the 5 source types (GranularSynth
+// exercises its async worklet init), flip row/column precedence, tempo,
+// and step count, and play -- all with zero console errors.
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
@@ -19,6 +19,18 @@ function fail(message) {
 
 function ok(message) {
   console.log(`ok: ${message}`);
+}
+
+/** An "override" field is a checkbox + a value control together (see
+ * fields.ts) -- this locator scoping matches both without depending on
+ * DOM order. */
+function overrideField(page, label) {
+  const field = page.locator(".panel-field", { hasText: label });
+  return {
+    field,
+    checkbox: field.locator(".override-control input[type=checkbox]"),
+    input: field.locator(".override-control input[type=range]"),
+  };
 }
 
 const browser = await chromium.launch();
@@ -44,30 +56,14 @@ const columnCount = await page.locator(".column-master").count();
 if (columnCount !== 8) fail(`expected 8 columns, found ${columnCount}`);
 else ok("8 columns loaded");
 
-// Regression: contextMenu.ts's renderField used to set a range/number
-// input's value *before* its min/max/step, so the browser's default
-// constraints (min 0, max 100, step 1) would silently round any
-// fractional value -- a fresh row's 0.8 default gain became 1 on its very
-// first render, before any onChange ever fired. Checking a never-touched
-// row's default catches that class of bug specifically (not just values
-// this script itself later sets).
-await page
-  .locator(".row-master", { hasText: "Kick" })
-  .click({ button: "right" });
-await page.waitForSelector(".context-menu");
-const freshGain = await page
-  .locator(".menu-field", { hasText: "Default gain" })
-  .locator("input[type=range]")
-  .inputValue();
-if (Number(freshGain) !== 0.8) {
-  fail(`fresh row's default gain should render as 0.8, got ${freshGain}`);
+// Nothing selected initially -- a hint, not an empty/broken-looking panel.
+if ((await page.locator(".panel-hint").count()) === 0) {
+  fail("expected a hint in the panel before anything is selected");
 } else {
-  ok("fractional default values render uncorrupted");
+  ok("panel shows a hint before anything is selected");
 }
-await page.mouse.click(10, 10);
-await page.waitForTimeout(50);
 
-// Cell toggle.
+// Cell toggle (left-click; unrelated to selection/panel).
 const firstCell = page.locator(".cell").first();
 const before = (await firstCell.getAttribute("class")) ?? "";
 await firstCell.click();
@@ -78,105 +74,143 @@ if (before.includes("on") === after.includes("on")) {
   ok("cell toggles on/off");
 }
 
-// Cell context menu opens and closes.
+// Select the cell (right-click) -- panel shows its fields, grid marks it.
 await firstCell.click({ button: "right" });
-await page.waitForSelector(".context-menu");
-const cellFieldCount = await page.locator(".context-menu .menu-field").count();
-if (cellFieldCount === 0) fail("cell context menu has no fields");
-await page.keyboard.press("Escape");
 await page.waitForTimeout(50);
-if ((await page.locator(".context-menu").count()) !== 0) {
-  fail("cell context menu did not close on Escape");
+if (!(await firstCell.evaluate((el) => el.classList.contains("selected")))) {
+  fail("selecting a cell did not mark it .selected in the grid");
 } else {
-  ok("cell context menu opens and closes");
+  ok("selecting a cell marks it in the grid");
+}
+const cellTitle = await page.locator(".panel-title").textContent();
+if (!cellTitle?.startsWith("Cell:")) {
+  fail(`expected a "Cell: ..." panel title, got "${cellTitle}"`);
+} else {
+  ok("cell panel title identifies row and column");
 }
 
-// Row-master context menu, including the filter/distortion/delay toggles.
-await page.locator(".row-master").first().click({ button: "right" });
-await page.waitForSelector(".context-menu");
-const rowFieldCount = await page.locator(".context-menu .menu-field").count();
-if (rowFieldCount === 0) fail("row-master context menu has no fields");
-const menuText = await page.locator(".context-menu").innerText();
-for (const label of ["Filter enabled", "Distortion enabled", "Delay enabled"]) {
-  if (!menuText.includes(label)) fail(`row menu missing "${label}" toggle`);
-}
-ok("row menu has filter/distortion/delay toggles");
-// Enabling Distortion should reveal its Amount slider once the menu is
-// reopened (this popup doesn't live-refresh an already-open menu).
-const distortionCheckbox = page
-  .locator(".menu-field", { hasText: "Distortion enabled" })
-  .locator("input[type=checkbox]");
-await distortionCheckbox.click();
-await page.waitForTimeout(100);
-await page.locator(".row-master").first().click({ button: "right" });
-await page.waitForSelector(".context-menu");
-const menuTextAfter = await page.locator(".context-menu").innerText();
-if (!menuTextAfter.includes("Amount")) {
-  fail("enabling Distortion did not reveal its Amount slider on reopen");
-} else {
-  ok("enabling an effect reveals its param slider");
-}
-await page.mouse.click(10, 10);
-await page.waitForTimeout(50);
-if ((await page.locator(".context-menu").count()) !== 0) {
-  fail("row-master context menu did not close on outside click");
-} else {
-  ok("row-master context menu opens and closes");
-}
-
-// Regression: renaming a row, setting its reverb send, and adjusting a
-// per-source-type param (Detune, on the oscillator "Synth" row) must all
-// persist and show the *current* value next time the menu reopens --
-// these previously fell back to a hardcoded/static value instead.
-const synthRow = page.locator(".row-master", { hasText: "Synth" });
-await synthRow.click({ button: "right" });
-await page.waitForSelector(".context-menu");
+// Select the "Kick" row -- exercise an override field end to end: starts
+// unchecked/disabled showing the resolved (built-in) value, checking it
+// enables the control, and the value survives switching selection away
+// and back (this is the state-persistence class of bug fixed earlier --
+// re-verified here against the new panel instead of the old popup).
 await page
-  .locator(".menu-field", { hasText: "Name" })
+  .locator(".row-master", { hasText: "Kick" })
+  .click({ button: "right" });
+await page.waitForTimeout(50);
+if ((await page.locator(".panel-title").textContent()) !== "Row: Kick") {
+  fail("row panel title should read exactly 'Row: Kick'");
+} else {
+  ok("row panel title identifies the row");
+}
+
+const noteOverride = overrideField(page, "Default note");
+if (await noteOverride.checkbox.isChecked()) {
+  fail("a fresh row's Default note override should start unchecked");
+}
+if (!(await noteOverride.input.isDisabled())) {
+  fail("Default note's value control should be disabled until overridden");
+}
+if ((await noteOverride.input.inputValue()) !== "60") {
+  fail(
+    `Default note should preview the built-in fallback (60) when not overridden, got ${await noteOverride.input.inputValue()}`,
+  );
+} else {
+  ok("override field starts unchecked, disabled, showing the resolved value");
+}
+
+await noteOverride.checkbox.click();
+await page.waitForTimeout(50);
+if (await noteOverride.input.isDisabled()) {
+  fail("Default note's value control should enable immediately on check");
+} else {
+  ok("checking an override enables its value control immediately");
+}
+await noteOverride.input.evaluate((el) => {
+  el.value = "84";
+  el.dispatchEvent(new Event("input", { bubbles: true }));
+});
+await page.waitForTimeout(50);
+
+await page
+  .locator(".row-master", { hasText: "Synth" })
+  .click({ button: "right" });
+await page.waitForTimeout(50);
+await page
+  .locator(".row-master", { hasText: "Kick" })
+  .click({ button: "right" });
+await page.waitForTimeout(50);
+const noteOverrideAgain = overrideField(page, "Default note");
+if (!(await noteOverrideAgain.checkbox.isChecked())) {
+  fail(
+    "Default note override did not survive switching selection away and back",
+  );
+}
+if ((await noteOverrideAgain.input.inputValue()) !== "84") {
+  fail(
+    `Default note value did not persist: expected 84, got ${await noteOverrideAgain.input.inputValue()}`,
+  );
+} else {
+  ok("override value and checked state persist across reselection");
+}
+
+// Rename via the panel; the grid label updates without needing to
+// reselect anything.
+await page
+  .locator(".panel-field", { hasText: "Name" })
   .locator("input[type=text]")
-  .fill("Lead");
-await page
-  .locator(".menu-field", { hasText: "Reverb send" })
-  .locator("input[type=range]")
-  .fill("0.42");
-await page
-  .locator(".menu-field", { hasText: "Detune" })
-  .locator("input[type=range]")
-  .fill("37");
-await page.keyboard.press("Tab"); // commit the text input's "change" event
-await page.mouse.click(10, 10);
-await page.waitForTimeout(100);
-
-const renamedRow = page.locator(".row-master", { hasText: "Lead" });
-if ((await renamedRow.count()) === 0) {
-  fail("row rename did not persist to the grid label");
-} else {
-  ok("row rename persists");
-}
-await renamedRow.click({ button: "right" });
-await page.waitForSelector(".context-menu");
-const reverbSendValue = await page
-  .locator(".menu-field", { hasText: "Reverb send" })
-  .locator("input[type=range]")
-  .inputValue();
-const detuneValue = await page
-  .locator(".menu-field", { hasText: "Detune" })
-  .locator("input[type=range]")
-  .inputValue();
-if (Number(reverbSendValue) < 0.4) {
-  fail(`reverb send did not persist: expected ~0.42, got ${reverbSendValue}`);
-} else {
-  ok("reverb send value persists across menu reopen");
-}
-if (Number(detuneValue) !== 37) {
-  fail(`Detune did not persist: expected 37, got ${detuneValue}`);
-} else {
-  ok("source param value persists across menu reopen");
-}
-await page.mouse.click(10, 10);
+  .fill("Kicker");
+await page.keyboard.press("Tab");
 await page.waitForTimeout(50);
+if ((await page.locator(".row-master", { hasText: "Kicker" }).count()) === 0) {
+  fail("renaming a row via the panel did not update its grid label");
+} else {
+  ok("row rename updates the grid label immediately");
+}
 
-// Column-master toggle (skip-this-step-for-every-row) via left click.
+// Row menu should show all three effect toggles, each already paired with
+// its (disabled-until-checked) param control -- nothing conditionally
+// appears/disappears as a side effect of *other* fields any more.
+const menuText = await page.locator(".config-panel").innerText();
+for (const label of ["Filter", "Distortion", "Delay"]) {
+  if (!menuText.includes(label))
+    fail(`row panel missing "${label}" effect toggle`);
+}
+ok("row panel shows all effect toggles without needing to reopen anything");
+
+const filterOverride = overrideField(page, "Filter");
+if (!(await filterOverride.input.isDisabled())) {
+  fail("Filter's param control should start disabled");
+}
+await filterOverride.checkbox.click();
+await page.waitForTimeout(50);
+if (await filterOverride.input.isDisabled()) {
+  fail("Filter's param control should enable immediately on check");
+} else {
+  ok("effect toggle enables its param control immediately, in place");
+}
+
+// Select a column -- override fields here too.
+await page.locator(".column-master").first().click({ button: "right" });
+await page.waitForTimeout(50);
+if ((await page.locator(".panel-title").textContent()) !== "Column 1") {
+  fail("column panel title should read exactly 'Column 1'");
+} else {
+  ok("column panel title identifies the column");
+}
+if (
+  !(await page
+    .locator(".column-master")
+    .first()
+    .evaluate((el) => el.classList.contains("selected")))
+) {
+  fail("selecting a column did not mark it .selected in the grid");
+} else {
+  ok("selecting a column marks it in the grid");
+}
+
+// Column header left-click still toggles skip-this-step-for-every-row,
+// independent of selection.
 const firstColumn = page.locator(".column-master").first();
 const columnBefore = (await firstColumn.getAttribute("class")) ?? "";
 await firstColumn.click();
@@ -188,17 +222,27 @@ if (columnBefore.includes("off") === columnAfter.includes("off")) {
 }
 await firstColumn.click(); // restore
 
-// Precedence toggle.
+// Select master -- gain, effect toggles, and limiter controls.
+await page.click("#master-button");
+await page.waitForTimeout(50);
+if ((await page.locator(".panel-title").textContent()) !== "Master") {
+  fail("master panel title should read exactly 'Master'");
+}
+const masterText = await page.locator(".config-panel").innerText();
+for (const label of ["Gain", "Filter", "Limiter ceiling", "Limiter release"]) {
+  if (!masterText.includes(label)) fail(`master panel missing "${label}"`);
+}
+ok("master panel has gain/effects/limiter controls");
+
+// Precedence, tempo, and step count controls.
 await page.selectOption("#precedence-select", "column");
 await page.selectOption("#precedence-select", "row");
 ok("precedence dropdown selectable");
 
-// Tempo: BPM + subdivision drive step length, not a raw seconds slider.
 await page.fill("#bpm", "160");
 await page.selectOption("#subdivision", "2"); // 1/8 notes
 ok("BPM/subdivision tempo controls accept input");
 
-// Variable step count: grid should actually resize.
 await page.fill("#column-count", "12");
 await page.dispatchEvent("#column-count", "change");
 await page.waitForTimeout(100);
@@ -209,31 +253,15 @@ if (resizedColumnCount !== 12) {
   ok("step count resizes the grid");
 }
 
-// Master panel: gain, effect toggles, and limiter controls.
-await page.click("#master-button");
-await page.waitForSelector(".context-menu");
-const masterMenuText = await page.locator(".context-menu").innerText();
-for (const label of [
-  "Gain",
-  "Filter enabled",
-  "Limiter ceiling",
-  "Limiter release",
-]) {
-  if (!masterMenuText.includes(label)) fail(`master panel missing "${label}"`);
-}
-ok("master panel has gain/effects/limiter controls");
-await page.mouse.click(10, 10);
-await page.waitForTimeout(50);
-
 // Add one row of each source type (granularSynth exercises the async
 // worklet init + fetched processor script; the others are synchronous).
 for (const sourceType of ["granularSynth", "noiseGenerator", "fmSynth"]) {
-  const before = await page.locator(".row-master").count();
+  const beforeCount = await page.locator(".row-master").count();
   await page.selectOption("#new-row-type", sourceType);
   await page.click("#add-row-button");
   await page.waitForTimeout(400);
   const afterCount = await page.locator(".row-master").count();
-  if (afterCount !== before + 1) {
+  if (afterCount !== beforeCount + 1) {
     fail(`adding a ${sourceType} row did not increase row count`);
   } else {
     ok(`added a ${sourceType} row`);

@@ -64,13 +64,15 @@ All three run inside the already-running dev container (`make up` first).
 ## Verify
 
 `tests/verify.mjs` is a manual (not CI) Playwright script that drives a
-real headless browser through the golden path: toggling a cell, opening
-each context-menu kind (cell/row-master/column-master) including the
-filter/distortion/delay toggles, adding one row of each of the 5 source
+real headless browser through the golden path: toggling a cell, selecting
+each panel kind (cell/row/column/master) and exercising an override field
+end to end (starts unchecked/disabled showing the resolved value, checking
+it enables the control immediately, the value survives switching selection
+away and back), the effect toggles, adding one row of each of the 5 source
 types (GranularSynth exercises its async worklet init), the precedence
-toggle, tempo (BPM/subdivision), resizing the step count, the master
-panel, and play/stop — asserting zero console errors throughout. Run it
-after touching grid/UI code (requires `make up` first):
+toggle, tempo (BPM/subdivision), resizing the step count, and play/stop —
+asserting zero console errors throughout. Run it after touching grid/UI
+code (requires `make up` first):
 
 ```
 make verify
@@ -98,18 +100,24 @@ Then open http://localhost:8080.
 
 - The grid loads with two starter rows ("Kick", a sample row; "Synth", an
   oscillator row) so it's audible immediately. Hit **Play**.
-- **Click a cell** to toggle it on/off.
-- **Right-click a cell** for its config menu: note, gain, gate, and
-  time-shift overrides, plus (sample rows only) a custom effects chain for
-  just that cell.
-- **Right-click a row label** (left column) for that row's config: source
-  type is fixed at creation, but trigger mode, default note, default gain,
-  time-shift, reverb send, its effect chain, sample loading, and
-  per-source-type params (waveform, grain density, etc.) all live here.
-  Left-click a row label to mute/unmute it.
-- **Right-click a column header** (top row) for that column's defaults
-  (note/gain/gate/time-shift). Left-click a column header to skip that
-  step for every row.
+- **Click a cell** to toggle it on/off. **Click a row label** to mute it.
+  **Click a column header** to skip that step for every row.
+- **Right-click a cell, row label, or column header** (or the **Master…**
+  button) to select it — its config appears in the panel to the right of
+  the grid, titled with what's selected ("Row: Kick", "Column 3", "Cell:
+  Kick × col 5", "Master"), and the selected thing gets a blue outline in
+  the grid so it's never ambiguous what the panel is editing. The panel
+  stays up as you work; selecting something else just swaps its contents,
+  no popup to reopen.
+- **Overridable fields** (note/gain/gate/time-shift on cells and columns;
+  note/gain/time-shift on rows; filter/distortion/delay everywhere
+  effects apply) are a checkbox plus its value control **together,
+  always** — the value control is just disabled while the checkbox is
+  unchecked, showing the value it'd currently resolve to from its parent
+  (row/column default, or the built-in fallback) as a preview. Checking
+  the box locks that value in as this level's own override. There's no
+  magic "which value means unset" to remember, and nothing conditionally
+  appears or disappears as a side effect of touching something else.
 - **Row/column precedence** dropdown (top bar): when both a row and a
   column set a default for the same field, this picks which one wins for
   cells that don't override it themselves.
@@ -120,20 +128,20 @@ Then open http://localhost:8080.
 - **Steps** (top bar): the number of columns, adjustable at any time —
   growing keeps existing columns' data and pads with fresh ones; shrinking
   drops the trailing columns.
-- **Master…** button (top bar): master gain, an optional master effects
-  chain (filter/distortion/delay, same toggles as a row's), and the
-  limiter's ceiling/release — the limiter itself is always on (a brickwall
-  safety net before the audio device, see `audioContext.ts`), this just
-  exposes its two params.
+- **Master** panel: master gain, an optional master effects chain
+  (filter/distortion/delay, same override fields as a row's), and the
+  limiter's ceiling/release — the limiter itself is always on (a
+  brickwall safety net before the audio device, see `audioContext.ts`),
+  this just exposes its two params.
 - **Add row**: pick a source type (sample player, oscillator, FM, noise,
   or granular synth) and a name, then **Add row**. Granular-synth rows
-  take a moment to initialize (loads an `AudioWorklet`).
-- **Effects** (row menu, and per-cell for sample rows): filter, distortion,
-  and delay, each an independent enable checkbox + one representative
-  param (cutoff / amount / time). An effect is "on" purely by being in the
-  chain — there's no separate wet knob to forget to turn up. Toggling a
-  checkbox reveals its param slider the next time you reopen the menu, not
-  live in the menu you're looking at.
+  take a moment to initialize (loads an `AudioWorklet`). Source type is
+  fixed at creation; everything else (trigger mode, defaults, reverb send,
+  effect chain, sample loading, per-source-type params like waveform or
+  grain density) lives in that row's panel.
+- **Per-cell effect chain override** (sample rows only, in a cell's
+  panel): a checkbox to give just that cell its own chain instead of
+  inheriting the row's.
 
 ## Project layout
 
@@ -149,8 +157,8 @@ src/
     effectsChain.ts        builds + ref-count-caches persistent effect chains
     gridModel.ts            the sequencer engine: shared clock, per-row/column/cell state, firing logic
   ui/
-    gridView.ts             renders the grid table, wires click/right-click
-    contextMenu.ts           generic popup menu used by all three menu kinds
+    gridView.ts             grid + config panel, selection state, click/right-click wiring
+    fields.ts                 form-field renderer shared by every panel kind (no popup)
 public/worklets/
   granular-processor.js  copied from bruit-kit/dist/sources/ -- GranularSynth loads
                           this at runtime via a fetched URL, not a bundler import

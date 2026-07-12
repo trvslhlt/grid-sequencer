@@ -3,8 +3,8 @@ import type { Precedence } from "./grid/config";
 import { GridModel } from "./grid/gridModel";
 import { SOURCE_TYPE_LABELS, type SourceType } from "./grid/sourceFactory";
 import { generateBlipBuffer } from "./sampleGen";
-import { openContextMenu } from "./ui/contextMenu";
-import { createGridView, effectsToggleFields } from "./ui/gridView";
+import type { Field } from "./ui/fields";
+import { createGridView, effectsFields } from "./ui/gridView";
 
 const INITIAL_COLUMN_COUNT = 8;
 
@@ -71,7 +71,59 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
     INITIAL_COLUMN_COUNT,
     computeStepSeconds(),
   );
-  const view = createGridView(gridEl, model);
+
+  // LimiterEffect has no getter for its own params (setParams only), so
+  // this app tracks the current values itself -- matching its constructor
+  // defaults -- to show the real current value each time the panel
+  // rebuilds rather than resetting the sliders to a hardcoded default.
+  let limiterCeiling = -1;
+  let limiterRelease = 0.1;
+
+  function buildMasterFields(): Field[] {
+    return [
+      {
+        key: "masterGain",
+        label: "Gain",
+        kind: "range",
+        value: model.masterGain.gain.value,
+        min: 0,
+        max: 1.5,
+        step: 0.01,
+        onChange: (v) => model.setMasterGain(v),
+      },
+      ...effectsFields(model.getMasterEffects(), (next) => {
+        model.setMasterEffects(next);
+      }),
+      {
+        key: "limiterCeiling",
+        label: "Limiter ceiling (dB)",
+        kind: "range",
+        value: limiterCeiling,
+        min: -12,
+        max: 0,
+        step: 0.5,
+        onChange: (v) => {
+          limiterCeiling = v;
+          limiter.setParams({ ceiling: v });
+        },
+      },
+      {
+        key: "limiterRelease",
+        label: "Limiter release (s)",
+        kind: "range",
+        value: limiterRelease,
+        min: 0.01,
+        max: 1,
+        step: 0.01,
+        onChange: (v) => {
+          limiterRelease = v;
+          limiter.setParams({ release: v });
+        },
+      },
+    ];
+  }
+
+  const view = createGridView(gridEl, model, { buildMasterFields });
 
   async function addRow(
     sourceType: SourceType,
@@ -139,59 +191,10 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
 
   precedenceSelectEl.addEventListener("change", () => {
     model.precedence = precedenceSelectEl.value as Precedence;
+    view.render();
   });
 
-  // LimiterEffect has no getter for its own params (setParams only), so
-  // this app tracks the current values itself -- matching its constructor
-  // defaults -- to show the real current value each time the panel reopens
-  // rather than resetting the sliders to a hardcoded default every time.
-  let limiterCeiling = -1;
-  let limiterRelease = 0.1;
-
-  masterButtonEl.addEventListener("click", () => {
-    const rect = masterButtonEl.getBoundingClientRect();
-    openContextMenu(rect.left, rect.bottom, "Master", [
-      {
-        key: "masterGain",
-        label: "Gain",
-        kind: "range",
-        value: model.masterGain.gain.value,
-        min: 0,
-        max: 1.5,
-        step: 0.01,
-        onChange: (v) => model.setMasterGain(v),
-      },
-      ...effectsToggleFields(model.getMasterEffects(), (next) => {
-        model.setMasterEffects(next);
-      }),
-      {
-        key: "limiterCeiling",
-        label: "Limiter ceiling (dB)",
-        kind: "range",
-        value: limiterCeiling,
-        min: -12,
-        max: 0,
-        step: 0.5,
-        onChange: (v) => {
-          limiterCeiling = v;
-          limiter.setParams({ ceiling: v });
-        },
-      },
-      {
-        key: "limiterRelease",
-        label: "Limiter release (s)",
-        kind: "range",
-        value: limiterRelease,
-        min: 0.01,
-        max: 1,
-        step: 0.01,
-        onChange: (v) => {
-          limiterRelease = v;
-          limiter.setParams({ release: v });
-        },
-      },
-    ]);
-  });
+  masterButtonEl.addEventListener("click", () => view.selectMaster());
 
   function tick(): void {
     view.refreshPlayhead();

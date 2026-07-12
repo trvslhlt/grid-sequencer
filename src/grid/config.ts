@@ -30,9 +30,15 @@ export interface RowConfig {
    * the resolved cascade note like a synth-like row. Ignored by every
    * other source type, which are inherently pitched. */
   playbackMode: "direct" | "pitched";
+  /** All three defaults below are optional -- a row that doesn't set one
+   * falls through to the column default (or built-in), same override
+   * relationship column defaults have to cell overrides. Whether a row
+   * currently sets a given default is exactly what an "override" checkbox
+   * in the UI reflects; there's no separate "is this overridden" flag to
+   * keep in sync. */
   defaultNote: number | undefined;
-  defaultGain: number;
-  defaultTimeShiftSeconds: number;
+  defaultGain: number | undefined;
+  defaultTimeShiftSeconds: number | undefined;
   /** This row's persistent effect chain, built once and never torn down
    * until the row is removed (see effectsChain.ts). */
   effects: EffectSpec[];

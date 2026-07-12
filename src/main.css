@@ -3,7 +3,7 @@ body {
   background: #16171b;
   color: #e4e6eb;
   padding: 1.5rem;
-  max-width: 900px;
+  max-width: 1200px;
   margin: 0 auto;
 }
 
@@ -47,11 +47,21 @@ input[type="number"] {
   padding: 0.2rem 0.4rem;
 }
 
+input:disabled {
+  opacity: 0.4;
+}
+
 .add-row {
   display: flex;
   gap: 0.5rem;
   margin-top: 1rem;
   align-items: center;
+}
+
+.grid-layout {
+  display: flex;
+  gap: 1.5rem;
+  align-items: flex-start;
 }
 
 .grid-table {
@@ -88,6 +98,10 @@ input[type="number"] {
   text-decoration: line-through;
 }
 
+.master-cell.selected {
+  box-shadow: 0 0 0 2px #4c7dff;
+}
+
 .row-master {
   justify-content: flex-start;
 }
@@ -115,49 +129,86 @@ input[type="number"] {
   border-color: #ffb454;
 }
 
+.cell.selected {
+  box-shadow: 0 0 0 2px #4c7dff;
+}
+
 .cell.playhead {
   box-shadow: 0 0 0 2px #ffb454;
 }
 
-.context-menu {
-  position: fixed;
-  z-index: 1000;
-  background: #21232a;
-  border: 1px solid #3a3e47;
+.cell.selected.playhead {
+  box-shadow: 0 0 0 2px #4c7dff, 0 0 0 4px #ffb454;
+}
+
+.config-panel {
+  flex: 1;
+  min-width: 280px;
+  max-width: 360px;
+  background: #1c1e24;
+  border: 1px solid #2a2d34;
   border-radius: 6px;
-  padding: 0.6rem;
-  min-width: 220px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  padding: 0.85rem;
 }
 
-.menu-title {
+.panel-title {
   font-weight: 600;
-  font-size: 0.85rem;
-  margin-bottom: 0.5rem;
+  font-size: 0.9rem;
+  margin-bottom: 0.6rem;
   color: #ffb454;
+  border-bottom: 1px solid #2a2d34;
+  padding-bottom: 0.5rem;
 }
 
-.menu-field {
+.panel-hint {
+  color: #6a6f7a;
+  font-size: 0.85rem;
+}
+
+.panel-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.panel-field {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 0.5rem;
-  margin-bottom: 0.4rem;
   font-size: 0.8rem;
 }
 
-.menu-field label {
+.panel-field label {
   flex-shrink: 0;
 }
 
-.menu-field input[type="range"] {
+.panel-field input[type="range"] {
   width: 100px;
 }
 
-.menu-field input[type="number"] {
+.panel-field input[type="number"] {
   width: 4.5rem;
 }
 
-.menu-field button {
+.panel-field button {
   width: 100%;
+}
+
+.panel-field select {
+  max-width: 140px;
+}
+
+.override-control {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.field-value {
+  font-variant-numeric: tabular-nums;
+  color: #9aa0ac;
+  font-size: 0.75rem;
+  min-width: 2.5em;
+  text-align: right;
 }

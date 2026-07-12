@@ -29,7 +29,14 @@ import {
 } from "./sourceFactory";
 import { triggerModeGate, triggerModeSourceParams } from "./triggerModes";
 
-const BUILT_INS = { note: 60, gain: 0.8, gate: 1.0, timeShiftSeconds: 0 };
+/** Exported so the UI can show the same fallback values a field resolves
+ * to when nothing overrides it -- see fields.ts's "override" kind. */
+export const BUILT_INS = {
+  note: 60,
+  gain: 0.8,
+  gate: 1.0,
+  timeShiftSeconds: 0,
+};
 
 function createColumnConfig(): ColumnConfig {
   return {
@@ -210,15 +217,15 @@ export class GridModel {
       enabled: true,
       triggerMode: { kind: "gatedToStep" },
       playbackMode: "direct",
-      defaultNote: 60,
-      defaultGain: BUILT_INS.gain,
-      defaultTimeShiftSeconds: 0,
+      defaultNote: undefined,
+      defaultGain: undefined,
+      defaultTimeShiftSeconds: undefined,
       effects: [],
       reverbSend: 0,
     };
     if (sourceType === "samplePlayer") {
       source.setParams({
-        rootNote: config.defaultNote,
+        rootNote: config.defaultNote ?? BUILT_INS.note,
         ...triggerModeSourceParams(config.triggerMode),
       });
     }
@@ -293,17 +300,21 @@ export class GridModel {
     const runtime = this.findRuntime(row);
     if (!runtime) return;
     runtime.config = { ...runtime.config, defaultNote: note };
-    if (runtime.config.sourceType === "samplePlayer" && note !== undefined) {
-      runtime.source.setParams({ rootNote: note });
+    // Keep in sync even when unset (falling back to the built-in) --
+    // direct-mode playback always uses this row's own note (never the
+    // column's), so the player's internal rootNote has to track it
+    // whether or not the row currently overrides it.
+    if (runtime.config.sourceType === "samplePlayer") {
+      runtime.source.setParams({ rootNote: note ?? BUILT_INS.note });
     }
   }
 
-  setRowDefaultGain(row: Row, gain: number): void {
+  setRowDefaultGain(row: Row, gain: number | undefined): void {
     const runtime = this.findRuntime(row);
     if (runtime) runtime.config = { ...runtime.config, defaultGain: gain };
   }
 
-  setRowDefaultTimeShift(row: Row, seconds: number): void {
+  setRowDefaultTimeShift(row: Row, seconds: number | undefined): void {
     const runtime = this.findRuntime(row);
     if (runtime) {
       runtime.config = { ...runtime.config, defaultTimeShiftSeconds: seconds };

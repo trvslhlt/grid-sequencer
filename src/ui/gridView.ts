@@ -1,21 +1,19 @@
 import type { EffectSpec, EffectType } from "../grid/config";
+import { BUILT_INS } from "../grid/gridModel";
 import type { GridModel, Row } from "../grid/gridModel";
 import { SOURCE_TYPE_LABELS } from "../grid/sourceFactory";
 import {
   TRIGGER_MODE_LABELS,
   type TriggerModeKind,
 } from "../grid/triggerModes";
-import { type MenuField, openContextMenu } from "./contextMenu";
+import { type Field, renderFields } from "./fields";
 
 /** filter/distortion/delay are the 3 persistent-chain effect types this UI
  * exposes (see effectsChain.ts's `EffectSpec` for the general shape any
- * project could add more of) -- enough to prove per-row and per-cell
- * chains are genuinely distinct without a full effect-chain builder UI
- * (reordering, multiple instances of one type, etc.), which is its own
- * project-specific surface PLAN.md leaves open. An effect is "on" purely
- * by being present in the array -- see effectsChain.ts's instantiateEffect,
- * which always forces wet:1 for whatever's present, so there's no separate
- * enabled flag to keep in sync. */
+ * project could add more of). An effect is "on" purely by being present
+ * in the array -- effectsFields below renders that as a single override
+ * field (checkbox + always-visible param), same as every other
+ * overridable value in this panel. */
 const EFFECT_TOGGLES: Array<{
   type: EffectType;
   label: string;
@@ -58,81 +56,80 @@ const EFFECT_TOGGLES: Array<{
   },
 ];
 
-/** Builds the enable-checkbox + param-slider pair for each of
- * filter/distortion/delay, reused by the row menu, the cell menu (sample
- * rows only), and main.ts's master-bus panel -- same shape everywhere, a
- * plain EffectSpec[] in, an updated one out via `onUpdate`. Toggling a
- * checkbox only reveals its param slider the next time the menu is
- * reopened, same as this UI's other conditionally-shown fields (e.g. the
- * explicit-duration seconds field) -- rebuilding the already-open menu
- * live isn't something this popup supports. */
-export function effectsToggleFields(
+export function effectsFields(
   effects: EffectSpec[],
   onUpdate: (next: EffectSpec[]) => void,
-): MenuField[] {
-  const fields: MenuField[] = [];
-  for (const toggle of EFFECT_TOGGLES) {
+): Field[] {
+  return EFFECT_TOGGLES.map((toggle) => {
     const spec = effects.find((e) => e.type === toggle.type);
-    fields.push({
-      key: `${toggle.type}-enabled`,
-      label: `${toggle.label} enabled`,
-      kind: "checkbox",
-      value: spec !== undefined,
-      onChange: (enabled) => {
+    const value =
+      typeof spec?.params[toggle.paramKey] === "number"
+        ? (spec.params[toggle.paramKey] as number)
+        : toggle.default;
+    return {
+      key: toggle.type,
+      label: `${toggle.label}: ${toggle.paramLabel}`,
+      kind: "override",
+      overridden: spec !== undefined,
+      value,
+      min: toggle.min,
+      max: toggle.max,
+      step: toggle.step,
+      onToggle: (on) => {
         onUpdate(
-          enabled
+          on
             ? [
                 ...effects,
-                {
-                  type: toggle.type,
-                  params: { [toggle.paramKey]: toggle.default },
-                },
+                { type: toggle.type, params: { [toggle.paramKey]: value } },
               ]
             : effects.filter((e) => e.type !== toggle.type),
         );
       },
-    });
-    if (spec) {
-      const value =
-        typeof spec.params[toggle.paramKey] === "number"
-          ? (spec.params[toggle.paramKey] as number)
-          : toggle.default;
-      fields.push({
-        key: `${toggle.type}-param`,
-        label: toggle.paramLabel,
-        kind: "range",
-        value,
-        min: toggle.min,
-        max: toggle.max,
-        step: toggle.step,
-        onChange: (v) => {
-          onUpdate(
-            effects.map((e) =>
-              e.type === toggle.type
-                ? { ...e, params: { ...e.params, [toggle.paramKey]: v } }
-                : e,
-            ),
-          );
-        },
-      });
-    }
-  }
-  return fields;
+      onChange: (v) => {
+        onUpdate(
+          effects.map((e) =>
+            e.type === toggle.type
+              ? { ...e, params: { ...e.params, [toggle.paramKey]: v } }
+              : e,
+          ),
+        );
+      },
+    };
+  });
+}
+
+type Selection =
+  | { kind: "row"; rowId: string }
+  | { kind: "column"; columnIndex: number }
+  | { kind: "cell"; rowId: string; columnIndex: number }
+  | { kind: "master" }
+  | null;
+
+export interface GridViewOptions {
+  buildMasterFields: () => Field[];
 }
 
 export interface GridViewHandle {
   render(): void;
   refreshPlayhead(): void;
+  selectMaster(): void;
 }
 
 export function createGridView(
   container: HTMLElement,
   model: GridModel,
+  options: GridViewOptions,
 ): GridViewHandle {
+  let selection: Selection = null;
   let cellEls: HTMLDivElement[][] = [];
 
-  function openRowMenu(x: number, y: number, row: Row): void {
-    const fields: MenuField[] = [
+  function select(next: Selection): void {
+    selection = next;
+    render();
+  }
+
+  function rowFields(row: Row): Field[] {
+    const fields: Field[] = [
       {
         key: "name",
         label: "Name",
@@ -211,41 +208,56 @@ export function createGridView(
       {
         key: "defaultNote",
         label: "Default note",
-        kind: "number",
-        value: row.config.defaultNote ?? 60,
+        kind: "override",
+        overridden: row.config.defaultNote !== undefined,
+        value: row.config.defaultNote ?? BUILT_INS.note,
         min: 0,
         max: 127,
         step: 1,
-        onChange: (v) => {
-          model.setRowDefaultNote(row, v);
+        onToggle: (on) => {
+          model.setRowDefaultNote(
+            row,
+            on ? (row.config.defaultNote ?? BUILT_INS.note) : undefined,
+          );
           render();
         },
+        onChange: (v) => model.setRowDefaultNote(row, v),
       },
       {
         key: "defaultGain",
         label: "Default gain",
-        kind: "range",
-        value: row.config.defaultGain,
+        kind: "override",
+        overridden: row.config.defaultGain !== undefined,
+        value: row.config.defaultGain ?? BUILT_INS.gain,
         min: 0,
         max: 1,
         step: 0.01,
-        onChange: (v) => {
-          model.setRowDefaultGain(row, v);
+        onToggle: (on) => {
+          model.setRowDefaultGain(
+            row,
+            on ? (row.config.defaultGain ?? BUILT_INS.gain) : undefined,
+          );
           render();
         },
+        onChange: (v) => model.setRowDefaultGain(row, v),
       },
       {
         key: "timeShift",
         label: "Default nudge (ms)",
-        kind: "range",
-        value: row.config.defaultTimeShiftSeconds * 1000,
+        kind: "override",
+        overridden: row.config.defaultTimeShiftSeconds !== undefined,
+        value: (row.config.defaultTimeShiftSeconds ?? 0) * 1000,
         min: -100,
         max: 100,
         step: 5,
-        onChange: (v) => {
-          model.setRowDefaultTimeShift(row, v / 1000);
+        onToggle: (on) => {
+          model.setRowDefaultTimeShift(
+            row,
+            on ? (row.config.defaultTimeShiftSeconds ?? 0) : undefined,
+          );
           render();
         },
+        onChange: (v) => model.setRowDefaultTimeShift(row, v / 1000),
       },
       {
         key: "reverbSend",
@@ -255,14 +267,10 @@ export function createGridView(
         min: 0,
         max: 1,
         step: 0.01,
-        onChange: (v) => {
-          model.setRowReverbSend(row, v);
-          render();
-        },
+        onChange: (v) => model.setRowReverbSend(row, v),
       },
-      ...effectsToggleFields(row.config.effects, (next) => {
+      ...effectsFields(row.config.effects, (next) => {
         model.setRowEffects(row, next);
-        render();
       }),
     );
 
@@ -321,16 +329,16 @@ export function createGridView(
       kind: "button",
       onClick: () => {
         model.removeRow(row);
-        render();
+        select(null);
       },
     });
 
-    openContextMenu(x, y, `Row: ${row.config.name}`, fields);
+    return fields;
   }
 
-  function openColumnMenu(x: number, y: number, columnIndex: number): void {
+  function columnFields(columnIndex: number): Field[] {
     const column = model.columns[columnIndex];
-    const fields: MenuField[] = [
+    return [
       {
         key: "enabled",
         label: "Enabled (not skipped)",
@@ -343,167 +351,242 @@ export function createGridView(
       },
       {
         key: "defaultNote",
-        label: "Default note (blank = none)",
-        kind: "number",
-        value: column.defaultNote ?? -1,
-        min: -1,
+        label: "Default note",
+        kind: "override",
+        overridden: column.defaultNote !== undefined,
+        value: column.defaultNote ?? BUILT_INS.note,
+        min: 0,
         max: 127,
         step: 1,
-        onChange: (v) =>
+        onToggle: (on) => {
           model.setColumn(columnIndex, {
-            defaultNote: v < 0 ? undefined : v,
-          }),
+            defaultNote: on
+              ? (column.defaultNote ?? BUILT_INS.note)
+              : undefined,
+          });
+          render();
+        },
+        onChange: (v) => model.setColumn(columnIndex, { defaultNote: v }),
       },
       {
         key: "defaultGain",
-        label: "Default gain (below 0 = none)",
-        kind: "number",
-        value: column.defaultGain ?? -1,
-        min: -1,
+        label: "Default gain",
+        kind: "override",
+        overridden: column.defaultGain !== undefined,
+        value: column.defaultGain ?? BUILT_INS.gain,
+        min: 0,
         max: 1,
-        step: 0.05,
-        onChange: (v) =>
+        step: 0.01,
+        onToggle: (on) => {
           model.setColumn(columnIndex, {
-            defaultGain: v < 0 ? undefined : v,
-          }),
+            defaultGain: on
+              ? (column.defaultGain ?? BUILT_INS.gain)
+              : undefined,
+          });
+          render();
+        },
+        onChange: (v) => model.setColumn(columnIndex, { defaultGain: v }),
       },
       {
         key: "defaultGate",
-        label: "Default gate (0 = none)",
-        kind: "number",
-        value: column.defaultGate ?? 0,
+        label: "Default gate",
+        kind: "override",
+        overridden: column.defaultGate !== undefined,
+        value: column.defaultGate ?? BUILT_INS.gate,
         min: 0,
         max: 4,
         step: 0.05,
-        onChange: (v) =>
+        onToggle: (on) => {
           model.setColumn(columnIndex, {
-            defaultGate: v <= 0 ? undefined : v,
-          }),
+            defaultGate: on
+              ? (column.defaultGate ?? BUILT_INS.gate)
+              : undefined,
+          });
+          render();
+        },
+        onChange: (v) => model.setColumn(columnIndex, { defaultGate: v }),
       },
       {
         key: "defaultShift",
         label: "Default nudge (ms)",
-        kind: "range",
+        kind: "override",
+        overridden: column.defaultTimeShiftSeconds !== undefined,
         value: (column.defaultTimeShiftSeconds ?? 0) * 1000,
         min: -100,
         max: 100,
         step: 5,
+        onToggle: (on) => {
+          model.setColumn(columnIndex, {
+            defaultTimeShiftSeconds: on
+              ? (column.defaultTimeShiftSeconds ?? 0)
+              : undefined,
+          });
+          render();
+        },
         onChange: (v) =>
           model.setColumn(columnIndex, { defaultTimeShiftSeconds: v / 1000 }),
       },
     ];
-    openContextMenu(x, y, `Column ${columnIndex + 1}`, fields);
   }
 
-  function openCellMenu(
-    x: number,
-    y: number,
-    row: Row,
-    columnIndex: number,
-  ): void {
+  function cellFields(row: Row, columnIndex: number): Field[] {
     const cell = row.cells[columnIndex];
     const resolved = model.resolveCell(row, columnIndex);
-    const fields: MenuField[] = [
+    const fields: Field[] = [
       {
-        key: "note",
-        label: `Note override (inherited: ${resolved.note})`,
-        kind: "number",
-        value: cell.note ?? -1,
-        min: -1,
-        max: 127,
-        step: 1,
+        key: "on",
+        label: "On",
+        kind: "checkbox",
+        value: cell.on,
         onChange: (v) => {
-          model.setCell(row, columnIndex, { note: v < 0 ? undefined : v });
+          model.setCell(row, columnIndex, { on: v });
           render();
         },
+      },
+      {
+        key: "note",
+        label: "Note",
+        kind: "override",
+        overridden: cell.note !== undefined,
+        value: cell.note ?? resolved.note,
+        min: 0,
+        max: 127,
+        step: 1,
+        onToggle: (on) => {
+          model.setCell(row, columnIndex, {
+            note: on ? resolved.note : undefined,
+          });
+          render();
+        },
+        onChange: (v) => model.setCell(row, columnIndex, { note: v }),
       },
       {
         key: "gain",
-        label: `Gain override (inherited: ${resolved.gain.toFixed(2)})`,
-        kind: "number",
-        value: cell.gain ?? -1,
-        min: -1,
+        label: "Gain",
+        kind: "override",
+        overridden: cell.gain !== undefined,
+        value: cell.gain ?? resolved.gain,
+        min: 0,
         max: 1,
-        step: 0.05,
-        onChange: (v) => {
-          model.setCell(row, columnIndex, { gain: v < 0 ? undefined : v });
+        step: 0.01,
+        onToggle: (on) => {
+          model.setCell(row, columnIndex, {
+            gain: on ? resolved.gain : undefined,
+          });
           render();
         },
+        onChange: (v) => model.setCell(row, columnIndex, { gain: v }),
       },
       {
         key: "gate",
-        label: `Gate override (inherited: ${resolved.gate.toFixed(2)})`,
-        kind: "number",
-        value: cell.gate ?? 0,
+        label: "Gate",
+        kind: "override",
+        overridden: cell.gate !== undefined,
+        value: cell.gate ?? resolved.gate,
         min: 0,
         max: 4,
         step: 0.05,
-        onChange: (v) => {
-          model.setCell(row, columnIndex, { gate: v <= 0 ? undefined : v });
+        onToggle: (on) => {
+          model.setCell(row, columnIndex, {
+            gate: on ? resolved.gate : undefined,
+          });
           render();
         },
+        onChange: (v) => model.setCell(row, columnIndex, { gate: v }),
       },
       {
         key: "shift",
-        label: "Time-shift override (ms)",
-        kind: "range",
-        value: (cell.timeShiftSeconds ?? 0) * 1000,
+        label: "Time-shift (ms)",
+        kind: "override",
+        overridden: cell.timeShiftSeconds !== undefined,
+        value: (cell.timeShiftSeconds ?? resolved.timeShiftSeconds) * 1000,
         min: -100,
         max: 100,
         step: 5,
-        onChange: (v) => {
-          model.setCell(row, columnIndex, { timeShiftSeconds: v / 1000 });
+        onToggle: (on) => {
+          model.setCell(row, columnIndex, {
+            timeShiftSeconds: on ? resolved.timeShiftSeconds : undefined,
+          });
           render();
         },
+        onChange: (v) =>
+          model.setCell(row, columnIndex, { timeShiftSeconds: v / 1000 }),
       },
     ];
 
     if (row.config.sourceType === "samplePlayer") {
       fields.push({
         key: "effectsOverride",
-        label: "Custom chain for this cell (else inherits the row's)",
+        label: "Custom effects chain (else inherits the row's)",
         kind: "checkbox",
         value: cell.effects !== undefined,
         onChange: (v) => {
-          model.setCell(row, columnIndex, {
-            effects: v ? [] : undefined,
-          });
+          model.setCell(row, columnIndex, { effects: v ? [] : undefined });
           render();
         },
       });
       if (cell.effects) {
         fields.push(
-          ...effectsToggleFields(cell.effects, (next) => {
+          ...effectsFields(cell.effects, (next) => {
             model.setCell(row, columnIndex, { effects: next });
-            render();
           }),
         );
       }
     }
 
-    openContextMenu(
-      x,
-      y,
-      `Cell: row ${row.config.name}, col ${columnIndex + 1}`,
-      fields,
-    );
+    return fields;
+  }
+
+  function panelTitleAndFields(rows: Row[]): {
+    title: string;
+    fields: Field[];
+  } {
+    if (selection === null) {
+      return { title: "Nothing selected", fields: [] };
+    }
+    if (selection.kind === "master") {
+      return { title: "Master", fields: options.buildMasterFields() };
+    }
+    if (selection.kind === "column") {
+      return {
+        title: `Column ${selection.columnIndex + 1}`,
+        fields: columnFields(selection.columnIndex),
+      };
+    }
+    const targetRowId = selection.rowId;
+    const row = rows.find((r) => r.id === targetRowId);
+    if (!row) {
+      selection = null;
+      return { title: "Nothing selected", fields: [] };
+    }
+    if (selection.kind === "row") {
+      return { title: `Row: ${row.config.name}`, fields: rowFields(row) };
+    }
+    return {
+      title: `Cell: ${row.config.name} × col ${selection.columnIndex + 1}`,
+      fields: cellFields(row, selection.columnIndex),
+    };
   }
 
   function render(): void {
     container.innerHTML = "";
     const rows = model.getRows();
 
+    const layout = document.createElement("div");
+    layout.className = "grid-layout";
+
     const grid = document.createElement("div");
     grid.className = "grid-table";
     grid.style.gridTemplateColumns = `120px repeat(${model.columnCount}, 34px)`;
 
-    // Corner + column-master header row.
     const corner = document.createElement("div");
     corner.className = "grid-corner";
     grid.appendChild(corner);
     model.columns.forEach((column, columnIndex) => {
       const header = document.createElement("div");
-      header.className = `master-cell column-master${column.enabled ? "" : " off"}`;
+      const isSelected =
+        selection?.kind === "column" && selection.columnIndex === columnIndex;
+      header.className = `master-cell column-master${column.enabled ? "" : " off"}${isSelected ? " selected" : ""}`;
       header.textContent = String(columnIndex + 1);
       header.addEventListener("click", () => {
         model.setColumn(columnIndex, { enabled: !column.enabled });
@@ -511,7 +594,7 @@ export function createGridView(
       });
       header.addEventListener("contextmenu", (event) => {
         event.preventDefault();
-        openColumnMenu(event.clientX, event.clientY, columnIndex);
+        select({ kind: "column", columnIndex });
       });
       grid.appendChild(header);
     });
@@ -519,7 +602,9 @@ export function createGridView(
     cellEls = [];
     for (const row of rows) {
       const rowMaster = document.createElement("div");
-      rowMaster.className = `master-cell row-master${row.config.enabled ? "" : " off"}`;
+      const rowSelected =
+        selection?.kind === "row" && selection.rowId === row.id;
+      rowMaster.className = `master-cell row-master${row.config.enabled ? "" : " off"}${rowSelected ? " selected" : ""}`;
       rowMaster.textContent = row.config.name;
       rowMaster.title = SOURCE_TYPE_LABELS[row.config.sourceType];
       rowMaster.addEventListener("click", () => {
@@ -528,7 +613,7 @@ export function createGridView(
       });
       rowMaster.addEventListener("contextmenu", (event) => {
         event.preventDefault();
-        openRowMenu(event.clientX, event.clientY, row);
+        select({ kind: "row", rowId: row.id });
       });
       grid.appendChild(rowMaster);
 
@@ -541,14 +626,18 @@ export function createGridView(
           cell.gate !== undefined ||
           cell.timeShiftSeconds !== undefined ||
           cell.effects !== undefined;
-        cellEl.className = `cell${cell.on ? " on" : ""}${overridden ? " overridden" : ""}`;
+        const cellSelected =
+          selection?.kind === "cell" &&
+          selection.rowId === row.id &&
+          selection.columnIndex === columnIndex;
+        cellEl.className = `cell${cell.on ? " on" : ""}${overridden ? " overridden" : ""}${cellSelected ? " selected" : ""}`;
         cellEl.addEventListener("click", () => {
           model.setCell(row, columnIndex, { on: !cell.on });
           render();
         });
         cellEl.addEventListener("contextmenu", (event) => {
           event.preventDefault();
-          openCellMenu(event.clientX, event.clientY, row, columnIndex);
+          select({ kind: "cell", rowId: row.id, columnIndex });
         });
         grid.appendChild(cellEl);
         rowCellEls.push(cellEl);
@@ -556,7 +645,29 @@ export function createGridView(
       cellEls.push(rowCellEls);
     }
 
-    container.appendChild(grid);
+    const panel = document.createElement("div");
+    panel.className = "config-panel";
+    const { title, fields } = panelTitleAndFields(rows);
+    const heading = document.createElement("div");
+    heading.className = "panel-title";
+    heading.textContent = title;
+    panel.appendChild(heading);
+    if (fields.length === 0 && selection === null) {
+      const hint = document.createElement("p");
+      hint.className = "panel-hint";
+      hint.textContent =
+        "Right-click a cell, a row label, or a column header to edit it here.";
+      panel.appendChild(hint);
+    } else {
+      const body = document.createElement("div");
+      body.className = "panel-body";
+      renderFields(body, fields);
+      panel.appendChild(body);
+    }
+
+    layout.appendChild(grid);
+    layout.appendChild(panel);
+    container.appendChild(layout);
   }
 
   function refreshPlayhead(): void {
@@ -574,5 +685,9 @@ export function createGridView(
   }
 
   render();
-  return { render, refreshPlayhead };
+  return {
+    render,
+    refreshPlayhead,
+    selectMaster: () => select({ kind: "master" }),
+  };
 }
