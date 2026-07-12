@@ -3,20 +3,34 @@ import type { Precedence } from "./grid/config";
 import { GridModel } from "./grid/gridModel";
 import { SOURCE_TYPE_LABELS, type SourceType } from "./grid/sourceFactory";
 import { generateBlipBuffer } from "./sampleGen";
-import { createGridView } from "./ui/gridView";
+import { openContextMenu } from "./ui/contextMenu";
+import { createGridView, effectsToggleFields } from "./ui/gridView";
 
-const COLUMN_COUNT = 8;
+const INITIAL_COLUMN_COUNT = 8;
+
+/** subdivisionsPerBeat -- app-level tempo->seconds conversion, same
+ * reasoning as PLAN.md's "Core model": the toolkit's clock works purely in
+ * seconds, BPM/subdivision is entirely this app's concern. */
+const SUBDIVISIONS: Array<{ label: string; value: number }> = [
+  { label: "1/4 notes", value: 1 },
+  { label: "1/8 notes", value: 2 },
+  { label: "1/8 triplets", value: 3 },
+  { label: "1/16 notes", value: 4 },
+  { label: "1/16 triplets", value: 6 },
+];
 
 const unlockEl = document.querySelector<HTMLDivElement>("#unlock")!;
 const appEl = document.querySelector<HTMLDivElement>("#app")!;
 const gridEl = document.querySelector<HTMLDivElement>("#grid")!;
 const playButtonEl = document.querySelector<HTMLButtonElement>("#play-button")!;
 const stopButtonEl = document.querySelector<HTMLButtonElement>("#stop-button")!;
-const stepSecondsEl =
-  document.querySelector<HTMLInputElement>("#step-seconds")!;
-const stepSecondsValueEl = document.querySelector<HTMLSpanElement>(
-  "#step-seconds-value",
-)!;
+const masterButtonEl =
+  document.querySelector<HTMLButtonElement>("#master-button")!;
+const bpmEl = document.querySelector<HTMLInputElement>("#bpm")!;
+const subdivisionEl =
+  document.querySelector<HTMLSelectElement>("#subdivision")!;
+const columnCountEl =
+  document.querySelector<HTMLInputElement>("#column-count")!;
 const precedenceSelectEl =
   document.querySelector<HTMLSelectElement>("#precedence-select")!;
 const newRowTypeEl =
@@ -32,19 +46,30 @@ for (const type of Object.keys(SOURCE_TYPE_LABELS) as SourceType[]) {
   newRowTypeEl.appendChild(option);
 }
 
+for (const subdivision of SUBDIVISIONS) {
+  const option = document.createElement("option");
+  option.value = String(subdivision.value);
+  option.textContent = subdivision.label;
+  if (subdivision.value === 4) option.selected = true;
+  subdivisionEl.appendChild(option);
+}
+
+function computeStepSeconds(): number {
+  const bpm = Math.max(1, Number(bpmEl.value));
+  const subdivisionsPerBeat = Number(subdivisionEl.value);
+  return 60 / bpm / subdivisionsPerBeat;
+}
+
 unlockAudioContext(unlockEl).then(async (audioContext) => {
   unlockEl.classList.add("hidden");
   appEl.classList.remove("hidden");
-
-  let stepSeconds = Number(stepSecondsEl.value);
-  stepSecondsValueEl.textContent = stepSeconds.toFixed(2);
 
   const limiter = getSharedLimiter(audioContext);
   const model = new GridModel(
     audioContext,
     limiter.input,
-    COLUMN_COUNT,
-    stepSeconds,
+    INITIAL_COLUMN_COUNT,
+    computeStepSeconds(),
   );
   const view = createGridView(gridEl, model);
 
@@ -98,14 +123,61 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
   playButtonEl.addEventListener("click", () => model.clock.start());
   stopButtonEl.addEventListener("click", () => model.clock.stop());
 
-  stepSecondsEl.addEventListener("input", () => {
-    stepSeconds = Number(stepSecondsEl.value);
-    stepSecondsValueEl.textContent = stepSeconds.toFixed(2);
-    model.setStepSeconds(stepSeconds);
+  bpmEl.addEventListener("input", () =>
+    model.setStepSeconds(computeStepSeconds()),
+  );
+  subdivisionEl.addEventListener("change", () =>
+    model.setStepSeconds(computeStepSeconds()),
+  );
+
+  columnCountEl.addEventListener("change", () => {
+    const count = Math.round(Number(columnCountEl.value));
+    if (count < 1) return;
+    model.setColumnCount(count);
+    view.render();
   });
 
   precedenceSelectEl.addEventListener("change", () => {
     model.precedence = precedenceSelectEl.value as Precedence;
+  });
+
+  masterButtonEl.addEventListener("click", () => {
+    const rect = masterButtonEl.getBoundingClientRect();
+    openContextMenu(rect.left, rect.bottom, "Master", [
+      {
+        key: "masterGain",
+        label: "Gain",
+        kind: "range",
+        value: model.masterGain.gain.value,
+        min: 0,
+        max: 1.5,
+        step: 0.01,
+        onChange: (v) => model.setMasterGain(v),
+      },
+      ...effectsToggleFields(model.getMasterEffects(), (next) => {
+        model.setMasterEffects(next);
+      }),
+      {
+        key: "limiterCeiling",
+        label: "Limiter ceiling (dB)",
+        kind: "range",
+        value: -1,
+        min: -12,
+        max: 0,
+        step: 0.5,
+        onChange: (v) => limiter.setParams({ ceiling: v }),
+      },
+      {
+        key: "limiterRelease",
+        label: "Limiter release (s)",
+        kind: "range",
+        value: 0.1,
+        min: 0.01,
+        max: 1,
+        step: 0.01,
+        onChange: (v) => limiter.setParams({ release: v }),
+      },
+    ]);
   });
 
   function tick(): void {

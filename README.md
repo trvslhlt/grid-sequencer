@@ -65,11 +65,12 @@ All three run inside the already-running dev container (`make up` first).
 
 `tests/verify.mjs` is a manual (not CI) Playwright script that drives a
 real headless browser through the golden path: toggling a cell, opening
-each context-menu kind (cell/row-master/column-master), adding one row of
-each of the 5 source types (GranularSynth exercises its async worklet
-init), the precedence toggle, and play/stop — asserting zero console
-errors throughout. Run it after touching grid/UI code (requires `make up`
-first):
+each context-menu kind (cell/row-master/column-master) including the
+filter/distortion/delay toggles, adding one row of each of the 5 source
+types (GranularSynth exercises its async worklet init), the precedence
+toggle, tempo (BPM/subdivision), resizing the step count, the master
+panel, and play/stop — asserting zero console errors throughout. Run it
+after touching grid/UI code (requires `make up` first):
 
 ```
 make verify
@@ -112,9 +113,27 @@ Then open http://localhost:8080.
 - **Row/column precedence** dropdown (top bar): when both a row and a
   column set a default for the same field, this picks which one wins for
   cells that don't override it themselves.
+- **Tempo** (top bar): BPM + a subdivision dropdown (1/4, 1/8, 1/16, and
+  their triplet variants) drive step length — the toolkit itself works
+  purely in seconds, so `60 / bpm / subdivisionsPerBeat` is entirely an
+  app-level conversion (`computeStepSeconds` in `src/main.ts`).
+- **Steps** (top bar): the number of columns, adjustable at any time —
+  growing keeps existing columns' data and pads with fresh ones; shrinking
+  drops the trailing columns.
+- **Master…** button (top bar): master gain, an optional master effects
+  chain (filter/distortion/delay, same toggles as a row's), and the
+  limiter's ceiling/release — the limiter itself is always on (a brickwall
+  safety net before the audio device, see `audioContext.ts`), this just
+  exposes its two params.
 - **Add row**: pick a source type (sample player, oscillator, FM, noise,
   or granular synth) and a name, then **Add row**. Granular-synth rows
   take a moment to initialize (loads an `AudioWorklet`).
+- **Effects** (row menu, and per-cell for sample rows): filter, distortion,
+  and delay, each an independent enable checkbox + one representative
+  param (cutoff / amount / time). An effect is "on" purely by being in the
+  chain — there's no separate wet knob to forget to turn up. Toggling a
+  checkbox reveals its param slider the next time you reopen the menu, not
+  live in the menu you're looking at.
 
 ## Project layout
 

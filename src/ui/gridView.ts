@@ -1,4 +1,4 @@
-import type { EffectSpec } from "../grid/config";
+import type { EffectSpec, EffectType } from "../grid/config";
 import type { GridModel, Row } from "../grid/gridModel";
 import { SOURCE_TYPE_LABELS } from "../grid/sourceFactory";
 import {
@@ -7,42 +7,117 @@ import {
 } from "../grid/triggerModes";
 import { type MenuField, openContextMenu } from "./contextMenu";
 
-/** filter+delay is the one persistent-chain shape this UI exposes (see
- * effectsChain.ts's `EffectSpec` for the general shape any project could
- * add more of) -- enough to prove per-row and per-cell chains are genuinely
- * distinct without a full effect-chain builder UI, which is its own
- * project-specific surface PLAN.md leaves open. */
-function defaultEffects(): EffectSpec[] {
-  return [
-    { type: "filter", params: { frequency: 8000 } },
-    { type: "delay", params: { delayMs: 180, feedback: 0.25, wet: 0 } },
-  ];
-}
+/** filter/distortion/delay are the 3 persistent-chain effect types this UI
+ * exposes (see effectsChain.ts's `EffectSpec` for the general shape any
+ * project could add more of) -- enough to prove per-row and per-cell
+ * chains are genuinely distinct without a full effect-chain builder UI
+ * (reordering, multiple instances of one type, etc.), which is its own
+ * project-specific surface PLAN.md leaves open. An effect is "on" purely
+ * by being present in the array -- see effectsChain.ts's instantiateEffect,
+ * which always forces wet:1 for whatever's present, so there's no separate
+ * enabled flag to keep in sync. */
+const EFFECT_TOGGLES: Array<{
+  type: EffectType;
+  label: string;
+  paramKey: string;
+  paramLabel: string;
+  min: number;
+  max: number;
+  step: number;
+  default: number;
+}> = [
+  {
+    type: "filter",
+    label: "Filter",
+    paramKey: "frequency",
+    paramLabel: "Cutoff (Hz)",
+    min: 200,
+    max: 8000,
+    step: 50,
+    default: 8000,
+  },
+  {
+    type: "distortion",
+    label: "Distortion",
+    paramKey: "amount",
+    paramLabel: "Amount",
+    min: 0,
+    max: 100,
+    step: 1,
+    default: 20,
+  },
+  {
+    type: "delay",
+    label: "Delay",
+    paramKey: "delayMs",
+    paramLabel: "Time (ms)",
+    min: 10,
+    max: 1000,
+    step: 10,
+    default: 180,
+  },
+];
 
-function effectsFilterFreq(effects: EffectSpec[]): number {
-  const filter = effects.find((e) => e.type === "filter");
-  return typeof filter?.params.frequency === "number"
-    ? filter.params.frequency
-    : 8000;
-}
-
-function effectsDelayWet(effects: EffectSpec[]): number {
-  const delay = effects.find((e) => e.type === "delay");
-  return typeof delay?.params.wet === "number" ? delay.params.wet : 0;
-}
-
-function withFilterFreq(effects: EffectSpec[], freq: number): EffectSpec[] {
-  return effects.map((e) =>
-    e.type === "filter"
-      ? { ...e, params: { ...e.params, frequency: freq } }
-      : e,
-  );
-}
-
-function withDelayWet(effects: EffectSpec[], wet: number): EffectSpec[] {
-  return effects.map((e) =>
-    e.type === "delay" ? { ...e, params: { ...e.params, wet } } : e,
-  );
+/** Builds the enable-checkbox + param-slider pair for each of
+ * filter/distortion/delay, reused by the row menu, the cell menu (sample
+ * rows only), and main.ts's master-bus panel -- same shape everywhere, a
+ * plain EffectSpec[] in, an updated one out via `onUpdate`. Toggling a
+ * checkbox only reveals its param slider the next time the menu is
+ * reopened, same as this UI's other conditionally-shown fields (e.g. the
+ * explicit-duration seconds field) -- rebuilding the already-open menu
+ * live isn't something this popup supports. */
+export function effectsToggleFields(
+  effects: EffectSpec[],
+  onUpdate: (next: EffectSpec[]) => void,
+): MenuField[] {
+  const fields: MenuField[] = [];
+  for (const toggle of EFFECT_TOGGLES) {
+    const spec = effects.find((e) => e.type === toggle.type);
+    fields.push({
+      key: `${toggle.type}-enabled`,
+      label: `${toggle.label} enabled`,
+      kind: "checkbox",
+      value: spec !== undefined,
+      onChange: (enabled) => {
+        onUpdate(
+          enabled
+            ? [
+                ...effects,
+                {
+                  type: toggle.type,
+                  params: { [toggle.paramKey]: toggle.default },
+                },
+              ]
+            : effects.filter((e) => e.type !== toggle.type),
+        );
+      },
+    });
+    if (spec) {
+      const value =
+        typeof spec.params[toggle.paramKey] === "number"
+          ? (spec.params[toggle.paramKey] as number)
+          : toggle.default;
+      fields.push({
+        key: `${toggle.type}-param`,
+        label: toggle.paramLabel,
+        kind: "range",
+        value,
+        min: toggle.min,
+        max: toggle.max,
+        step: toggle.step,
+        onChange: (v) => {
+          onUpdate(
+            effects.map((e) =>
+              e.type === toggle.type
+                ? { ...e, params: { ...e.params, [toggle.paramKey]: v } }
+                : e,
+            ),
+          );
+        },
+      });
+    }
+  }
+  return fields;
 }
 
 export interface GridViewHandle {
@@ -179,40 +254,10 @@ export function createGridView(
         step: 0.01,
         onChange: (v) => model.setRowReverbSend(row, v),
       },
-      {
-        key: "filterFreq",
-        label: "Chain: filter cutoff (Hz)",
-        kind: "range",
-        value: effectsFilterFreq(
-          row.config.effects.length ? row.config.effects : defaultEffects(),
-        ),
-        min: 200,
-        max: 8000,
-        step: 50,
-        onChange: (v) => {
-          const base = row.config.effects.length
-            ? row.config.effects
-            : defaultEffects();
-          model.setRowEffects(row, withFilterFreq(base, v));
-        },
-      },
-      {
-        key: "delayWet",
-        label: "Chain: delay amount",
-        kind: "range",
-        value: effectsDelayWet(
-          row.config.effects.length ? row.config.effects : defaultEffects(),
-        ),
-        min: 0,
-        max: 1,
-        step: 0.01,
-        onChange: (v) => {
-          const base = row.config.effects.length
-            ? row.config.effects
-            : defaultEffects();
-          model.setRowEffects(row, withDelayWet(base, v));
-        },
-      },
+      ...effectsToggleFields(row.config.effects, (next) => {
+        model.setRowEffects(row, next);
+        render();
+      }),
     );
 
     for (const field of row.source.paramFields) {
@@ -404,31 +449,23 @@ export function createGridView(
     if (row.config.sourceType === "samplePlayer") {
       fields.push({
         key: "effectsOverride",
-        label: "Effects: custom chain for this cell",
+        label: "Custom chain for this cell (else inherits the row's)",
         kind: "checkbox",
         value: cell.effects !== undefined,
         onChange: (v) => {
           model.setCell(row, columnIndex, {
-            effects: v ? defaultEffects() : undefined,
+            effects: v ? [] : undefined,
           });
           render();
         },
       });
       if (cell.effects) {
-        fields.push({
-          key: "cellFilterFreq",
-          label: "Cell chain: filter cutoff (Hz)",
-          kind: "range",
-          value: effectsFilterFreq(cell.effects),
-          min: 200,
-          max: 8000,
-          step: 50,
-          onChange: (v) => {
-            model.setCell(row, columnIndex, {
-              effects: withFilterFreq(cell.effects ?? defaultEffects(), v),
-            });
-          },
-        });
+        fields.push(
+          ...effectsToggleFields(cell.effects, (next) => {
+            model.setCell(row, columnIndex, { effects: next });
+            render();
+          }),
+        );
       }
     }
 

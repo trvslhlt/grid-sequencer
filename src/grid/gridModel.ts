@@ -11,6 +11,7 @@ import {
 import {
   type CellConfig,
   type ColumnConfig,
+  type EffectSpec,
   type Precedence,
   type ResolvedCellConfig,
   type RowConfig,
@@ -18,6 +19,7 @@ import {
 } from "./config";
 import {
   type BuiltEffectsChain,
+  buildEffectsChain,
   createEffectsChainCache,
 } from "./effectsChain";
 import {
@@ -28,6 +30,27 @@ import {
 import { triggerModeGate, triggerModeSourceParams } from "./triggerModes";
 
 const BUILT_INS = { note: 60, gain: 0.8, gate: 1.0, timeShiftSeconds: 0 };
+
+function createColumnConfig(): ColumnConfig {
+  return {
+    enabled: true,
+    defaultNote: undefined,
+    defaultGain: undefined,
+    defaultGate: undefined,
+    defaultTimeShiftSeconds: undefined,
+  };
+}
+
+function createCellConfig(): CellConfig {
+  return {
+    on: false,
+    note: undefined,
+    gain: undefined,
+    gate: undefined,
+    timeShiftSeconds: undefined,
+    effects: undefined,
+  };
+}
 
 /** Linear 0-1 -> MIDI velocity (0-127) -- every sources/ class scales its
  * per-voice envelope peak by velocity/127, so this is the whole
@@ -69,8 +92,13 @@ export type Row = Readonly<
 export class GridModel {
   readonly clock: StepClock;
   readonly reverb: ReverbEffect;
-  readonly columns: ColumnConfig[];
+  readonly masterGain: GainNode;
+  columns: ColumnConfig[];
   precedence: Precedence = "row";
+  columnCount: number;
+  private masterEffects: EffectSpec[] = [];
+  private masterChain: BuiltEffectsChain;
+  private readonly masterDestination: AudioNode;
   private readonly chainCache: ReturnType<typeof createEffectsChainCache>;
   private readonly rows: RowRuntime[] = [];
   private stepSeconds: number;
@@ -78,22 +106,30 @@ export class GridModel {
   constructor(
     private readonly audioContext: AudioContext,
     dryDestination: AudioNode,
-    readonly columnCount: number,
+    initialColumnCount: number,
     initialStepSeconds: number,
   ) {
     this.stepSeconds = initialStepSeconds;
+    this.columnCount = initialColumnCount;
     this.clock = createStepClock(audioContext, () => this.stepSeconds);
-    this.chainCache = createEffectsChainCache(audioContext, dryDestination);
+    this.masterDestination = dryDestination;
+
+    // Master bus: every row's persistent chain and the shared reverb both
+    // feed into masterGain, so a single fader/effects chain here affects
+    // the whole mix, downstream of everything else.
+    this.masterGain = audioContext.createGain();
+    this.masterGain.gain.value = 1;
+    this.masterChain = buildEffectsChain(audioContext, []);
+    this.masterChain.output.connect(dryDestination);
+    this.masterGain.connect(this.masterChain.input);
+
+    this.chainCache = createEffectsChainCache(audioContext, this.masterGain);
     this.reverb = new ReverbEffect(audioContext);
     this.reverb.setParams({ wet: 1, decaySeconds: 2.2 });
-    this.reverb.output.connect(dryDestination);
-    this.columns = Array.from({ length: columnCount }, () => ({
-      enabled: true,
-      defaultNote: undefined,
-      defaultGain: undefined,
-      defaultGate: undefined,
-      defaultTimeShiftSeconds: undefined,
-    }));
+    this.reverb.output.connect(this.masterGain);
+    this.columns = Array.from({ length: this.columnCount }, () =>
+      createColumnConfig(),
+    );
     this.clock.onTick((stepIndex, atTime, stepSeconds) =>
       this.fireTick(stepIndex, atTime, stepSeconds),
     );
@@ -101,6 +137,59 @@ export class GridModel {
 
   setStepSeconds(seconds: number): void {
     this.stepSeconds = seconds;
+  }
+
+  /** Growing pads with fresh default cells (existing columns keep their
+   * data); shrinking just drops the trailing columns' data. A row
+   * currently waiting to join at the next cycle re-targets that wait to
+   * the new count, so it still means "the next full cycle," not a boundary
+   * that no longer exists. */
+  setColumnCount(count: number): void {
+    if (count === this.columnCount || count < 1) return;
+    if (count > this.columnCount) {
+      const extra = count - this.columnCount;
+      this.columns.push(
+        ...Array.from({ length: extra }, () => createColumnConfig()),
+      );
+      for (const runtime of this.rows) {
+        runtime.cells.push(
+          ...Array.from({ length: extra }, () => createCellConfig()),
+        );
+      }
+    } else {
+      this.columns.length = count;
+      for (const runtime of this.rows) {
+        runtime.cells.length = count;
+      }
+    }
+    for (const runtime of this.rows) {
+      if (runtime.pendingCycleLength !== null) {
+        runtime.pendingCycleLength = count;
+      }
+    }
+    this.columnCount = count;
+  }
+
+  setMasterGain(gain: number): void {
+    this.masterGain.gain.value = gain;
+  }
+
+  /** Same acquire-before-release pattern as setRowEffects, just against a
+   * single always-present chain instead of the shared ref-counted cache
+   * (there's only ever one master chain, so caching/sharing it with
+   * anything else would be pointless). */
+  setMasterEffects(effects: EffectSpec[]): void {
+    const newChain = buildEffectsChain(this.audioContext, effects);
+    newChain.output.connect(this.masterDestination);
+    this.masterGain.disconnect();
+    this.masterGain.connect(newChain.input);
+    this.masterChain.dispose();
+    this.masterChain = newChain;
+    this.masterEffects = effects;
+  }
+
+  getMasterEffects(): EffectSpec[] {
+    return this.masterEffects;
   }
 
   getRows(): Row[] {
@@ -143,14 +232,7 @@ export class GridModel {
       id: crypto.randomUUID(),
       config,
       source,
-      cells: Array.from({ length: this.columnCount }, () => ({
-        on: false,
-        note: undefined,
-        gain: undefined,
-        gate: undefined,
-        timeShiftSeconds: undefined,
-        effects: undefined,
-      })),
+      cells: Array.from({ length: this.columnCount }, () => createCellConfig()),
       chain,
       send,
       sampleBuffer: undefined,

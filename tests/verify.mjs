@@ -68,11 +68,31 @@ if ((await page.locator(".context-menu").count()) !== 0) {
   ok("cell context menu opens and closes");
 }
 
-// Row-master context menu.
+// Row-master context menu, including the filter/distortion/delay toggles.
 await page.locator(".row-master").first().click({ button: "right" });
 await page.waitForSelector(".context-menu");
 const rowFieldCount = await page.locator(".context-menu .menu-field").count();
 if (rowFieldCount === 0) fail("row-master context menu has no fields");
+const menuText = await page.locator(".context-menu").innerText();
+for (const label of ["Filter enabled", "Distortion enabled", "Delay enabled"]) {
+  if (!menuText.includes(label)) fail(`row menu missing "${label}" toggle`);
+}
+ok("row menu has filter/distortion/delay toggles");
+// Enabling Distortion should reveal its Amount slider once the menu is
+// reopened (this popup doesn't live-refresh an already-open menu).
+const distortionCheckbox = page
+  .locator(".menu-field", { hasText: "Distortion enabled" })
+  .locator("input[type=checkbox]");
+await distortionCheckbox.click();
+await page.waitForTimeout(100);
+await page.locator(".row-master").first().click({ button: "right" });
+await page.waitForSelector(".context-menu");
+const menuTextAfter = await page.locator(".context-menu").innerText();
+if (!menuTextAfter.includes("Amount")) {
+  fail("enabling Distortion did not reveal its Amount slider on reopen");
+} else {
+  ok("enabling an effect reveals its param slider");
+}
 await page.mouse.click(10, 10);
 await page.waitForTimeout(50);
 if ((await page.locator(".context-menu").count()) !== 0) {
@@ -97,6 +117,38 @@ await firstColumn.click(); // restore
 await page.selectOption("#precedence-select", "column");
 await page.selectOption("#precedence-select", "row");
 ok("precedence dropdown selectable");
+
+// Tempo: BPM + subdivision drive step length, not a raw seconds slider.
+await page.fill("#bpm", "160");
+await page.selectOption("#subdivision", "2"); // 1/8 notes
+ok("BPM/subdivision tempo controls accept input");
+
+// Variable step count: grid should actually resize.
+await page.fill("#column-count", "12");
+await page.dispatchEvent("#column-count", "change");
+await page.waitForTimeout(100);
+const resizedColumnCount = await page.locator(".column-master").count();
+if (resizedColumnCount !== 12) {
+  fail(`expected 12 columns after resize, found ${resizedColumnCount}`);
+} else {
+  ok("step count resizes the grid");
+}
+
+// Master panel: gain, effect toggles, and limiter controls.
+await page.click("#master-button");
+await page.waitForSelector(".context-menu");
+const masterMenuText = await page.locator(".context-menu").innerText();
+for (const label of [
+  "Gain",
+  "Filter enabled",
+  "Limiter ceiling",
+  "Limiter release",
+]) {
+  if (!masterMenuText.includes(label)) fail(`master panel missing "${label}"`);
+}
+ok("master panel has gain/effects/limiter controls");
+await page.mouse.click(10, 10);
+await page.waitForTimeout(50);
 
 // Add one row of each source type (granularSynth exercises the async
 // worklet init + fetched processor script; the others are synchronous).

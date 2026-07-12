@@ -18,10 +18,19 @@
       <div class="transport">
         <button id="play-button">Play</button>
         <button id="stop-button">Stop</button>
+        <button id="master-button">Master…</button>
         <label>
-          Step length (s)
-          <input id="step-seconds" type="range" min="0.08" max="0.6" step="0.01" value="0.18" />
-          <span id="step-seconds-value"></span>
+          Tempo
+          <input id="bpm" type="number" min="20" max="300" step="1" value="120" />
+          BPM
+        </label>
+        <label>
+          Subdivision
+          <select id="subdivision"></select>
+        </label>
+        <label>
+          Steps
+          <input id="column-count" type="number" min="1" max="32" step="1" value="8" />
         </label>
         <label>
           Row/column precedence
