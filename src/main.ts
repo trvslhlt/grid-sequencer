@@ -91,9 +91,10 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
         step: 0.01,
         onChange: (v) => model.setMasterGain(v),
       },
-      ...effectsFields(model.getMasterEffects(), (next) => {
-        model.setMasterEffects(next);
-      }),
+      ...effectsFields(
+        () => model.getMasterEffects(),
+        (next) => model.setMasterEffects(next),
+      ),
       {
         key: "limiterCeiling",
         label: "Limiter ceiling (dB)",

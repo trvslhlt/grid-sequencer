@@ -62,10 +62,13 @@ export interface CellConfig {
   gain: number | undefined;
   gate: number | undefined;
   timeShiftSeconds: number | undefined;
-  /** When set, replaces the row's own effect chain selection for this cell
-   * outright rather than merging with it -- a cell either uses its row's
-   * persistent chain or its own, not a blend of both. */
-  effects: EffectSpec[] | undefined;
+  /** This cell's own would-be effect chain -- always present (not
+   * undefined) so it can be edited and previewed while `effectsOverride`
+   * is off, same as every other override's value control stays live
+   * while unchecked. Only takes effect (replacing the row's own chain
+   * outright, not merging with it) when `effectsOverride` is true. */
+  effects: EffectSpec[];
+  effectsOverride: boolean;
 }
 
 export interface ResolvedCellConfig {
@@ -148,6 +151,6 @@ export function resolveCellConfig(
       precedence,
       builtIns.timeShiftSeconds,
     ),
-    effects: cell.effects ?? row.effects,
+    effects: cell.effectsOverride ? cell.effects : row.effects,
   };
 }

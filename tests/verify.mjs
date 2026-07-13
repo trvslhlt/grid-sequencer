@@ -190,6 +190,114 @@ if (await filterOverride.input.isDisabled()) {
   ok("effect toggle enables its param control immediately, in place");
 }
 
+// Regression: toggling an effect on and then dragging its value, with no
+// render in between, used to silently revert the toggle -- the value
+// handler closed over the pre-toggle effects array. Reselecting away and
+// back forces a render from live model state, exposing the bug if it's
+// back.
+await filterOverride.input.evaluate((el) => {
+  el.value = "3500";
+  el.dispatchEvent(new Event("input", { bubbles: true }));
+});
+await page.waitForTimeout(50);
+await page
+  .locator(".row-master", { hasText: "Synth" })
+  .click({ button: "right" });
+await page.waitForTimeout(50);
+await page
+  .locator(".row-master", { hasText: "Kicker" })
+  .click({ button: "right" });
+await page.waitForTimeout(50);
+const filterOverrideAfter = overrideField(page, "Filter");
+if (!(await filterOverrideAfter.checkbox.isChecked())) {
+  fail("effect toggle+drag reverted the toggle (stale-closure regression)");
+}
+if ((await filterOverrideAfter.input.inputValue()) !== "3500") {
+  fail(
+    `effect value did not persist after toggle+drag: expected 3500, got ${await filterOverrideAfter.input.inputValue()}`,
+  );
+} else {
+  ok("effect toggle survives a value drag with no render in between");
+}
+
+// Cell-level effects override: a header button next to the panel title
+// (not a field in the list), with the effects controls always visible
+// and interactive -- just visually dimmed -- while the override is off.
+await firstCell.click({ button: "right" });
+await page.waitForTimeout(50);
+const headerButton = page.locator(".panel-header-button");
+if ((await headerButton.count()) !== 1) {
+  fail("expected a header override button on a sample row's cell panel");
+}
+if (await headerButton.evaluate((el) => el.classList.contains("active"))) {
+  fail("cell override button should start inactive");
+}
+const dimmedSection = page.locator(".dimmed-section");
+if (!(await dimmedSection.evaluate((el) => el.classList.contains("dimmed")))) {
+  fail("cell effects section should start dimmed (override off)");
+}
+const cellFilterCheckbox = dimmedSection
+  .locator(".panel-field", { hasText: "Filter" })
+  .locator("input[type=checkbox]");
+const cellFilterInput = dimmedSection
+  .locator(".panel-field", { hasText: "Filter" })
+  .locator("input[type=range]");
+if (await cellFilterInput.isDisabled()) {
+  fail("dimmed cell effects controls should stay interactive, not disabled");
+} else {
+  ok("cell effects section starts dimmed but interactive");
+}
+await cellFilterCheckbox.click();
+await page.waitForTimeout(50);
+await cellFilterInput.evaluate((el) => {
+  el.value = "2200";
+  el.dispatchEvent(new Event("input", { bubbles: true }));
+});
+await page.waitForTimeout(50);
+await headerButton.click();
+await page.waitForTimeout(50);
+if (
+  !(await page
+    .locator(".panel-header-button")
+    .evaluate((el) => el.classList.contains("active")))
+) {
+  fail("cell override button did not activate");
+}
+if (
+  await page
+    .locator(".dimmed-section")
+    .evaluate((el) => el.classList.contains("dimmed"))
+) {
+  fail(
+    "cell effects section should no longer be dimmed once override is active",
+  );
+}
+const cellFilterCheckboxAfter = page
+  .locator(".dimmed-section .panel-field", { hasText: "Filter" })
+  .locator("input[type=checkbox]");
+const cellFilterInputAfter = page
+  .locator(".dimmed-section .panel-field", { hasText: "Filter" })
+  .locator("input[type=range]");
+if (!(await cellFilterCheckboxAfter.isChecked())) {
+  fail(
+    "cell effect checkbox set while dimmed did not survive activating override",
+  );
+}
+if ((await cellFilterInputAfter.inputValue()) !== "2200") {
+  fail(
+    `cell effect value set while dimmed did not persist: expected 2200, got ${await cellFilterInputAfter.inputValue()}`,
+  );
+} else {
+  ok("cell effects configured while dimmed persist once override is activated");
+}
+if (!(await firstCell.evaluate((el) => el.classList.contains("overridden")))) {
+  fail(
+    "cell should show the overridden indicator once its effects override is active",
+  );
+} else {
+  ok("cell shows overridden indicator once its effects override is active");
+}
+
 // Select a column -- override fields here too.
 await page.locator(".column-master").first().click({ button: "right" });
 await page.waitForTimeout(50);

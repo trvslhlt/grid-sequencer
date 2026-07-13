@@ -55,7 +55,8 @@ function createCellConfig(): CellConfig {
     gain: undefined,
     gate: undefined,
     timeShiftSeconds: undefined,
-    effects: undefined,
+    effects: [],
+    effectsOverride: false,
   };
 }
 
@@ -201,6 +202,18 @@ export class GridModel {
 
   getRows(): Row[] {
     return this.rows.map((r) => this.toRow(r));
+  }
+
+  /** A fresh lookup, not a cached wrapper -- `Row.config` is replaced (not
+   * mutated) on every change, so a `Row` object from an earlier `getRows()`
+   * call goes stale the moment anything about it changes. Callers that
+   * need the *current* config after their own earlier snapshot might have
+   * gone stale (e.g. a field handler firing after a previous one already
+   * changed the same row) should re-fetch through here rather than trust
+   * a `Row` they're still holding. */
+  getRow(id: string): Row | undefined {
+    const runtime = this.rows.find((r) => r.id === id);
+    return runtime ? this.toRow(runtime) : undefined;
   }
 
   async addRow(
@@ -435,7 +448,7 @@ export class GridModel {
 
       if (
         runtime.config.sourceType === "samplePlayer" &&
-        cell.effects !== undefined
+        cell.effectsOverride
       ) {
         this.fireSamplePlayerOverride(
           runtime,

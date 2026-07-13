@@ -56,10 +56,18 @@ const EFFECT_TOGGLES: Array<{
   },
 ];
 
+/** `getEffects` is called fresh inside every handler, not just once up
+ * front: none of this panel's continuous controls trigger a rebuild on
+ * their own "input" events (see fields.ts's top comment for why), so a
+ * checkbox toggle followed by a value drag with no render in between
+ * would otherwise have the value handler still closing over the
+ * pre-toggle array and silently reverting the toggle when it fires. */
 export function effectsFields(
-  effects: EffectSpec[],
+  getEffects: () => EffectSpec[],
   onUpdate: (next: EffectSpec[]) => void,
+  options: { alwaysInteractive?: boolean } = {},
 ): Field[] {
+  const effects = getEffects();
   return EFFECT_TOGGLES.map((toggle) => {
     const spec = effects.find((e) => e.type === toggle.type);
     const value =
@@ -71,23 +79,26 @@ export function effectsFields(
       label: `${toggle.label}: ${toggle.paramLabel}`,
       kind: "override",
       overridden: spec !== undefined,
+      alwaysInteractive: options.alwaysInteractive,
       value,
       min: toggle.min,
       max: toggle.max,
       step: toggle.step,
       onToggle: (on) => {
+        const current = getEffects();
         onUpdate(
           on
             ? [
-                ...effects,
+                ...current,
                 { type: toggle.type, params: { [toggle.paramKey]: value } },
               ]
-            : effects.filter((e) => e.type !== toggle.type),
+            : current.filter((e) => e.type !== toggle.type),
         );
       },
       onChange: (v) => {
+        const current = getEffects();
         onUpdate(
-          effects.map((e) =>
+          current.map((e) =>
             e.type === toggle.type
               ? { ...e, params: { ...e.params, [toggle.paramKey]: v } }
               : e,
@@ -269,9 +280,10 @@ export function createGridView(
         step: 0.01,
         onChange: (v) => model.setRowReverbSend(row, v),
       },
-      ...effectsFields(row.config.effects, (next) => {
-        model.setRowEffects(row, next);
-      }),
+      ...effectsFields(
+        () => model.getRow(row.id)?.config.effects ?? [],
+        (next) => model.setRowEffects(row, next),
+      ),
     );
 
     const sourceParams = row.source.getParams();
@@ -429,7 +441,13 @@ export function createGridView(
     ];
   }
 
-  function cellFields(row: Row, columnIndex: number): Field[] {
+  interface CellPanel {
+    fields: Field[];
+    headerButton?: { label: string; active: boolean; onClick: () => void };
+    dimmedSection?: { fields: Field[]; dimmed: boolean };
+  }
+
+  function cellFields(row: Row, columnIndex: number): CellPanel {
     const cell = row.cells[columnIndex];
     const resolved = model.resolveCell(row, columnIndex);
     const fields: Field[] = [
@@ -514,33 +532,43 @@ export function createGridView(
       },
     ];
 
-    if (row.config.sourceType === "samplePlayer") {
-      fields.push({
-        key: "effectsOverride",
-        label: "Custom effects chain (else inherits the row's)",
-        kind: "checkbox",
-        value: cell.effects !== undefined,
-        onChange: (v) => {
-          model.setCell(row, columnIndex, { effects: v ? [] : undefined });
-          render();
-        },
-      });
-      if (cell.effects) {
-        fields.push(
-          ...effectsFields(cell.effects, (next) => {
-            model.setCell(row, columnIndex, { effects: next });
-          }),
-        );
-      }
+    if (row.config.sourceType !== "samplePlayer") {
+      return { fields };
     }
 
-    return fields;
+    return {
+      fields,
+      headerButton: {
+        label: "Override",
+        active: cell.effectsOverride,
+        onClick: () => {
+          model.setCell(row, columnIndex, {
+            effectsOverride: !cell.effectsOverride,
+          });
+          render();
+        },
+      },
+      // Always shown and always interactive, even while inactive -- so a
+      // cell's chain can be dialed in ahead of time, silently, and
+      // switched on later with a single click instead of building it from
+      // scratch under time pressure. `dimmed` is purely visual (see
+      // main.css's .dimmed-section); it never disables the controls.
+      dimmedSection: {
+        fields: effectsFields(
+          () => row.cells[columnIndex].effects,
+          (next) => model.setCell(row, columnIndex, { effects: next }),
+          { alwaysInteractive: true },
+        ),
+        dimmed: !cell.effectsOverride,
+      },
+    };
   }
 
-  function panelTitleAndFields(rows: Row[]): {
+  interface PanelContent extends CellPanel {
     title: string;
-    fields: Field[];
-  } {
+  }
+
+  function panelTitleAndFields(rows: Row[]): PanelContent {
     if (selection === null) {
       return { title: "Nothing selected", fields: [] };
     }
@@ -564,7 +592,7 @@ export function createGridView(
     }
     return {
       title: `Cell: ${row.config.name} × col ${selection.columnIndex + 1}`,
-      fields: cellFields(row, selection.columnIndex),
+      ...cellFields(row, selection.columnIndex),
     };
   }
 
@@ -625,7 +653,7 @@ export function createGridView(
           cell.gain !== undefined ||
           cell.gate !== undefined ||
           cell.timeShiftSeconds !== undefined ||
-          cell.effects !== undefined;
+          cell.effectsOverride;
         const cellSelected =
           selection?.kind === "cell" &&
           selection.rowId === row.id &&
@@ -647,12 +675,25 @@ export function createGridView(
 
     const panel = document.createElement("div");
     panel.className = "config-panel";
-    const { title, fields } = panelTitleAndFields(rows);
+    const { title, fields, headerButton, dimmedSection } =
+      panelTitleAndFields(rows);
+
     const heading = document.createElement("div");
-    heading.className = "panel-title";
-    heading.textContent = title;
+    heading.className = "panel-title-row";
+    const headingTitle = document.createElement("span");
+    headingTitle.className = "panel-title";
+    headingTitle.textContent = title;
+    heading.appendChild(headingTitle);
+    if (headerButton) {
+      const button = document.createElement("button");
+      button.className = `panel-header-button${headerButton.active ? " active" : ""}`;
+      button.textContent = headerButton.label;
+      button.addEventListener("click", headerButton.onClick);
+      heading.appendChild(button);
+    }
     panel.appendChild(heading);
-    if (fields.length === 0 && selection === null) {
+
+    if (fields.length === 0 && !dimmedSection && selection === null) {
       const hint = document.createElement("p");
       hint.className = "panel-hint";
       hint.textContent =
@@ -663,6 +704,13 @@ export function createGridView(
       body.className = "panel-body";
       renderFields(body, fields);
       panel.appendChild(body);
+    }
+
+    if (dimmedSection) {
+      const section = document.createElement("div");
+      section.className = `panel-body dimmed-section${dimmedSection.dimmed ? " dimmed" : ""}`;
+      renderFields(section, dimmedSection.fields);
+      panel.appendChild(section);
     }
 
     layout.appendChild(grid);

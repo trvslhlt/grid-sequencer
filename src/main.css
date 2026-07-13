@@ -151,13 +151,35 @@ input:disabled {
   padding: 0.85rem;
 }
 
+.panel-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.6rem;
+  border-bottom: 1px solid #2a2d34;
+  padding-bottom: 0.5rem;
+}
+
 .panel-title {
   font-weight: 600;
   font-size: 0.9rem;
-  margin-bottom: 0.6rem;
   color: #ffb454;
-  border-bottom: 1px solid #2a2d34;
-  padding-bottom: 0.5rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.panel-header-button {
+  flex-shrink: 0;
+  font-size: 0.75rem;
+  padding: 0.25rem 0.6rem;
+}
+
+.panel-header-button.active {
+  background: #4c7dff;
+  border-color: #4c7dff;
+  color: #fff;
 }
 
 .panel-hint {
@@ -169,6 +191,20 @@ input:disabled {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+}
+
+.dimmed-section {
+  margin-top: 0.6rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid #2a2d34;
+  transition: opacity 0.15s;
+}
+
+/* Visual only -- these controls stay fully interactive while dimmed (see
+ * gridView.ts's cellFields), so a cell's effects chain can be dialed in
+ * before switching the override on. */
+.dimmed-section.dimmed {
+  opacity: 0.4;
 }
 
 .panel-field {

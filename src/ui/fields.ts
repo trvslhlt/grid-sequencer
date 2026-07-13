@@ -77,6 +77,14 @@ export type Field =
       min: number;
       max: number;
       step: number;
+      /** Normally the value control disables while unchecked -- there's
+       * nothing to preview-and-edit if it isn't in effect. Some overrides
+       * (a cell's own effects chain) are worth being able to dial in
+       * *before* switching them on instead of starting from scratch under
+       * time pressure; for those, set this and pair it with a dimmed
+       * wrapper around the whole field instead (see gridView.ts's
+       * cellFields) -- purely visual, the control stays interactive. */
+      alwaysInteractive?: boolean;
       onToggle: (overridden: boolean) => void;
       onChange: (value: number) => void;
     };
@@ -202,10 +210,10 @@ function renderOverrideControl(
     field.step,
     field.onChange,
   );
-  input.disabled = !field.overridden;
+  if (!field.alwaysInteractive) input.disabled = !field.overridden;
 
   checkbox.addEventListener("change", () => {
-    input.disabled = !checkbox.checked;
+    if (!field.alwaysInteractive) input.disabled = !checkbox.checked;
     field.onToggle(checkbox.checked);
   });
 

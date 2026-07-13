@@ -68,10 +68,14 @@ real headless browser through the golden path: toggling a cell, selecting
 each panel kind (cell/row/column/master) and exercising an override field
 end to end (starts unchecked/disabled showing the resolved value, checking
 it enables the control immediately, the value survives switching selection
-away and back), the effect toggles, adding one row of each of the 5 source
-types (GranularSynth exercises its async worklet init), the precedence
-toggle, tempo (BPM/subdivision), resizing the step count, and play/stop —
-asserting zero console errors throughout. Run it after touching grid/UI
+away and back), the effect toggles (including toggling one on and dragging
+its value with no render in between — a stale-closure regression that
+silently reverted the toggle, since fixed), the cell-level effects
+override button and its always-interactive-but-dimmed controls, adding
+one row of each of the 5 source types (GranularSynth exercises its async
+worklet init), the precedence toggle, tempo (BPM/subdivision), resizing
+the step count, and play/stop — asserting zero console errors throughout.
+Run it after touching grid/UI
 code (requires `make up` first):
 
 ```
@@ -139,9 +143,14 @@ Then open http://localhost:8080.
   fixed at creation; everything else (trigger mode, defaults, reverb send,
   effect chain, sample loading, per-source-type params like waveform or
   grain density) lives in that row's panel.
-- **Per-cell effect chain override** (sample rows only, in a cell's
-  panel): a checkbox to give just that cell its own chain instead of
-  inheriting the row's.
+- **Per-cell effect chain override** (sample rows only): an **Override**
+  button next to the panel title, not a field in the list. The
+  filter/distortion/delay controls below it are always visible and always
+  interactive, even while the override is off, so you can dial in a
+  cell's chain ahead of time instead of building it from scratch under
+  time pressure — they just grey out to show they aren't currently in
+  effect. Flipping the button on switches that cell to its own chain
+  (with whatever you'd already set up) instead of inheriting the row's.
 
 ## Project layout
 
