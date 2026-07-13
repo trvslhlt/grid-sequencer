@@ -195,6 +195,21 @@ make run-image-backend
   there, not off — it already contributes its values unconditionally
   (there's no useful "off" state for a side that always wins anyway), so
   only the losing side's button is actually clickable and meaningful.
+- **Key / Scale** dropdowns (top bar): a global constraint above the
+  cell/row/column note cascade, not part of it — whatever note a cell
+  resolves to (default 60/middle C unless a row, column, or cell sets its
+  own) gets silently snapped to the nearest pitch in the chosen key/scale
+  right before it sounds, nearest-neighbor with ties toward the lower
+  note. Every note field in the panel (row/column "Default note", a
+  cell's own note override) still shows the raw, un-snapped value it was
+  set to — the snap is audible-only, there's no note-name picker or
+  live "what this will actually sound as" readout. Defaults to
+  **Chromatic** (every semitone legal, i.e. off), so nothing changes
+  until a key/scale is explicitly picked. A `samplePlayer` row's
+  "direct" playback mode (its own "Playback" dropdown) is unaffected
+  regardless of scale — it always plays its own default note unpitched
+  already, ignoring the note cascade entirely, so there's nothing for a
+  scale to constrain there.
 - **Envelope** (every row, column, and cell): a multi-point breakpoint
   curve, not a fixed ADSR — drag points to reshape it, double-click empty
   space to add a point, double-click a point to remove it (the first/last
@@ -320,6 +335,7 @@ src/
   patchApi.ts             fetch wrappers for /api/patches + /api/samples
   grid/
     config.ts             cascade config types + resolveCellConfig (cell > row/column > built-in)
+    scale.ts               global key/scale quantizeToScale, applied above the cascade in fireTick
     sourceFactory.ts       uniform wrapper over bruit-kit's 5 sources/ classes
     triggerModes.ts        maps trigger-mode choice -> SamplePlayer params + TrackStep.gate
     effectsChain.ts        builds + ref-count-caches persistent effect chains
@@ -388,3 +404,11 @@ arbitrarily reroute per note):
   actually get addressed). Deleting a patch isn't wired up anywhere yet
   either; `backend/patches`/`backend/samples` are plain directories you
   can always clean up by hand.
+- **Key/Scale quantization is audible-only, never shown in the UI.** A
+  row/column "Default note" field or a cell's own note override always
+  displays the raw value it's set to, even when a non-Chromatic scale is
+  active and what actually sounds is a different (nearest in-scale)
+  pitch — there's no inline "this will sound as X" readout or note-name
+  picker, by design (see `src/grid/scale.ts`'s `quantizeToScale`, applied
+  in `GridModel.fireTick` right before `noteOn`, not anywhere in the
+  resolved-config the panel itself reads).

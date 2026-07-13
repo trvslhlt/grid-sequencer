@@ -17,6 +17,21 @@ export const patchesRouter = Router();
  * anything special on this side. */
 const PROTECTED_NAME = "demo";
 
+/** Mirrors the frontend's ScaleType (src/grid/scale.ts) -- validated here,
+ * unlike most of this store's opaque fields, because an unrecognized
+ * value would crash the frontend's quantizeToScale (an unknown key's
+ * `SCALE_INTERVALS[scaleType]` lookup is undefined), same reasoning as
+ * `precedence` being validated just below. */
+const VALID_SCALE_TYPES = new Set([
+  "chromatic",
+  "major",
+  "naturalMinor",
+  "harmonicMinor",
+  "dorian",
+  "majorPentatonic",
+  "minorPentatonic",
+]);
+
 patchesRouter.get("/", async (_req, res) => {
   const patches = await listPatches();
   res.json({ patches });
@@ -62,6 +77,15 @@ patchesRouter.post("/", async (req, res) => {
     subdivision: body.subdivision ?? 4,
     columnCount: body.columnCount ?? 8,
     precedence: body.precedence === "column" ? "column" : "row",
+    scaleRoot:
+      Number.isInteger(body.scaleRoot) &&
+      (body.scaleRoot as number) >= 0 &&
+      (body.scaleRoot as number) <= 11
+        ? (body.scaleRoot as number)
+        : 0,
+    scaleType: VALID_SCALE_TYPES.has(body.scaleType as string)
+      ? (body.scaleType as string)
+      : "chromatic",
     columns: body.columns ?? [],
     masterGain: body.masterGain ?? 1,
     masterEffects: body.masterEffects ?? [],

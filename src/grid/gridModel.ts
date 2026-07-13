@@ -18,6 +18,7 @@ import {
   buildEffectsChain,
   createEffectsChainCache,
 } from "./effectsChain";
+import { type ScaleType, quantizeToScale } from "./scale";
 import {
   type RowSource,
   type SourceType,
@@ -138,6 +139,15 @@ export class GridModel {
   readonly masterGain: GainNode;
   columns: ColumnConfig[];
   precedence: Precedence = "row";
+  /** A global quantization constraint above the cell/row/column note
+   * cascade -- not part of that cascade itself, same reasoning as
+   * `precedence` being a plain top-level field rather than something
+   * resolveCellConfig resolves. `scaleRoot` is 0-11 (C=0), applied in
+   * fireTick (see quantizeToScale in ./scale). Defaults to "chromatic"
+   * (every semitone legal, i.e. off) so existing patches and the demo are
+   * unaffected until a user opts in. */
+  scaleRoot = 0;
+  scaleType: ScaleType = "chromatic";
   columnCount: number;
   private masterEffects: EffectSpec[] = [];
   private masterChain: BuiltEffectsChain;
@@ -534,11 +544,16 @@ export class GridModel {
 
       const shiftedAtTime = atTime + resolved.timeShiftSeconds;
       const gateSeconds = stepSeconds * resolved.gate;
+      // "direct" playback mode is deliberately pitch-cascade-immune
+      // already (see RowConfig.playbackMode's doc) -- quantizing it too
+      // would introduce a pitch shift on rows that explicitly opt out of
+      // pitch entirely, so scale quantization only applies to the normal
+      // cascade-resolved branch.
       const note =
         runtime.config.sourceType === "samplePlayer" &&
         runtime.config.playbackMode === "direct"
           ? runtime.config.defaultNote
-          : resolved.note;
+          : quantizeToScale(resolved.note, this.scaleRoot, this.scaleType);
 
       if (
         runtime.config.sourceType === "samplePlayer" &&

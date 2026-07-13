@@ -4,6 +4,7 @@ import { Recorder } from "bruit-kit/audio";
 import { getSharedLimiter, unlockAudioContext } from "./audioContext";
 import type { Precedence } from "./grid/config";
 import { GridModel, type Row } from "./grid/gridModel";
+import { KEY_LABELS, SCALE_LABELS, type ScaleType } from "./grid/scale";
 import { SOURCE_TYPE_LABELS, type SourceType } from "./grid/sourceFactory";
 import { type TempoState, applyPatch, serializePatch } from "./patch";
 import {
@@ -55,6 +56,9 @@ const columnCountEl =
   document.querySelector<HTMLInputElement>("#column-count")!;
 const precedenceSelectEl =
   document.querySelector<HTMLSelectElement>("#precedence-select")!;
+const keySelectEl = document.querySelector<HTMLSelectElement>("#key-select")!;
+const scaleSelectEl =
+  document.querySelector<HTMLSelectElement>("#scale-select")!;
 const newRowTypeEl =
   document.querySelector<HTMLSelectElement>("#new-row-type")!;
 const newRowNameEl = document.querySelector<HTMLInputElement>("#new-row-name")!;
@@ -82,6 +86,21 @@ for (const subdivision of SUBDIVISIONS) {
   option.textContent = subdivision.label;
   if (subdivision.value === 4) option.selected = true;
   subdivisionEl.appendChild(option);
+}
+
+KEY_LABELS.forEach((label, semitone) => {
+  const option = document.createElement("option");
+  option.value = String(semitone);
+  option.textContent = label;
+  keySelectEl.appendChild(option);
+});
+
+for (const [scaleType, label] of Object.entries(SCALE_LABELS)) {
+  const option = document.createElement("option");
+  option.value = scaleType;
+  option.textContent = label;
+  if (scaleType === "chromatic") option.selected = true;
+  scaleSelectEl.appendChild(option);
 }
 
 function computeStepSeconds(): number {
@@ -234,13 +253,16 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
     model.setStepSeconds(computeStepSeconds());
   }
 
-  // applyPatch already updates model.precedence/columnCount directly (see
-  // patch.ts) -- this just syncs the two top-bar controls that mirror
-  // them, which nothing else does automatically since they're plain
-  // change-event-driven inputs, not read from the model on every render.
+  // applyPatch already updates model.precedence/columnCount/scaleRoot/
+  // scaleType directly (see patch.ts) -- this just syncs the top-bar
+  // controls that mirror them, which nothing else does automatically
+  // since they're plain change-event-driven inputs, not read from the
+  // model on every render.
   function syncTopBarFromModel(): void {
     precedenceSelectEl.value = model.precedence;
     columnCountEl.value = String(model.columnCount);
+    keySelectEl.value = String(model.scaleRoot);
+    scaleSelectEl.value = model.scaleType;
   }
 
   async function refreshPatchList(): Promise<void> {
@@ -442,6 +464,16 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
   precedenceSelectEl.addEventListener("change", () => {
     model.precedence = precedenceSelectEl.value as Precedence;
     view.render();
+  });
+
+  // Neither needs a re-render -- nothing in the panel reads
+  // scaleRoot/scaleType, unlike precedence (which affects the Defaults
+  // section's disabled state).
+  keySelectEl.addEventListener("change", () => {
+    model.scaleRoot = Number(keySelectEl.value);
+  });
+  scaleSelectEl.addEventListener("change", () => {
+    model.scaleType = scaleSelectEl.value as ScaleType;
   });
 
   masterButtonEl.addEventListener("click", () => view.selectMaster());

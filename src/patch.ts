@@ -37,6 +37,8 @@ export function serializePatch(
     subdivision: tempoState.subdivision,
     columnCount: model.columnCount,
     precedence: model.precedence,
+    scaleRoot: model.scaleRoot,
+    scaleType: model.scaleType,
     columns: model.columns,
     masterGain: model.masterGain.gain.value,
     masterEffects: model.getMasterEffects(),
@@ -80,6 +82,11 @@ export async function applyPatch(
 
   model.setColumnCount(patch.columnCount);
   model.precedence = patch.precedence;
+  // ?? fallback: patches saved before this field existed have no
+  // scaleRoot/scaleType key at all -- fall back to GridModel's own
+  // "off" defaults rather than clobbering them with undefined.
+  model.scaleRoot = patch.scaleRoot ?? 0;
+  model.scaleType = patch.scaleType ?? "chromatic";
   patch.columns.forEach((columnConfig, i) => {
     model.setColumn(i, columnConfig as Partial<ColumnConfig>);
   });

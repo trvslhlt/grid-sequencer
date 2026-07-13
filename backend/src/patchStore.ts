@@ -44,6 +44,12 @@ export interface Patch extends PatchSummary {
   subdivision: number;
   columnCount: number;
   precedence: "row" | "column";
+  /** A global constraint above the row/column/cell cascade (see the
+   * frontend's src/grid/scale.ts) -- opaque here too, same reasoning as
+   * everything else this store never inspects, just round-trips.
+   * scaleRoot is 0-11 (C=0). */
+  scaleRoot: number;
+  scaleType: string;
   columns: unknown[];
   masterGain: number;
   masterEffects: unknown[];

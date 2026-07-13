@@ -37,6 +37,15 @@ export interface Patch extends PatchSummary {
   subdivision: number;
   columnCount: number;
   precedence: "row" | "column";
+  scaleRoot: number;
+  scaleType:
+    | "chromatic"
+    | "major"
+    | "naturalMinor"
+    | "harmonicMinor"
+    | "dorian"
+    | "majorPentatonic"
+    | "minorPentatonic";
   columns: unknown[];
   masterGain: number;
   masterEffects: unknown[];

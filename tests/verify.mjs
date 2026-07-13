@@ -11,7 +11,9 @@
 // delay/compressor/tremolo/ringMod) and every one of each one's own
 // params -- not just a single headline param each -- add one of each of
 // the 5 source types (GranularSynth exercises its async worklet init),
-// flip row/column precedence, tempo, and step count, patch persistence
+// flip row/column precedence, tempo, step count, and the global key/scale
+// (playback keeps working, note fields stay untouched by the silent
+// snap), patch persistence
 // (save under a name, reload the page for a genuinely fresh context,
 // confirm "demo" loads by default and the saved patch round-trips
 // through the real backend), recording audio out to a real WAV download,
@@ -461,7 +463,9 @@ if ((await uploadCategorySelect.count()) === 0) {
 const librarySelect = page
   .locator(".panel-field", { hasText: "Sample library" })
   .locator("select");
-const libraryOptionLabels = await librarySelect.locator("option").allTextContents();
+const libraryOptionLabels = await librarySelect
+  .locator("option")
+  .allTextContents();
 if (
   !libraryOptionLabels.some((l) => l.includes("percussion")) ||
   !libraryOptionLabels.some((l) => l.includes("pad"))
@@ -652,6 +656,53 @@ if (playheadWithDelay === 0) {
   fail(`errors after enabling Delay:\n${errors.join("\n")}`);
 } else {
   ok("enabling Delay doesn't break playback or throw");
+}
+
+// Global key/scale: a quantization constraint above the note cascade
+// (see scale.ts's quantizeToScale, applied in gridModel.ts's fireTick) --
+// note fields in the panel are never touched by it (silent snap, not a
+// picker), and playback should keep working with a non-chromatic scale
+// active.
+const keySelect = page.locator("#key-select");
+const scaleSelect = page.locator("#scale-select");
+if ((await scaleSelect.inputValue()) !== "chromatic") {
+  fail(
+    `scale should default to chromatic (off), got "${await scaleSelect.inputValue()}"`,
+  );
+}
+const bassDefaultNote = page
+  .locator(".panel-field", { hasText: "Default note" })
+  .locator("input[type=number]");
+// Still on the Filter/Delay row from above (Kicker) -- switch to Bass,
+// whose Default note (36) isn't already in C major, to make a real snap
+// possible if this leaked into the displayed value.
+await page
+  .locator(".row-master", { hasText: "Bass" })
+  .click({ button: "right" });
+await page.waitForTimeout(50);
+const bassNoteBefore = await bassDefaultNote.inputValue();
+await keySelect.selectOption("2"); // D
+await scaleSelect.selectOption("major");
+await page.waitForTimeout(50);
+if ((await bassDefaultNote.inputValue()) !== bassNoteBefore) {
+  fail(
+    "changing the global scale should never rewrite a note field's raw value",
+  );
+} else {
+  ok("scale change doesn't touch note fields' displayed (raw) values");
+}
+await page.click("#play-button");
+await page.waitForTimeout(600);
+const playheadWithScale = await page.evaluate(
+  () => document.querySelectorAll(".cell.playhead").length,
+);
+await page.click("#stop-button");
+if (playheadWithScale === 0) {
+  fail("playhead stopped advancing with a non-chromatic scale active");
+} else if (errors.length > 0) {
+  fail(`errors after enabling a scale:\n${errors.join("\n")}`);
+} else {
+  ok("a non-chromatic key/scale doesn't break playback or throw");
 }
 
 // Cell panel: an Envelope section (every source type) plus, for sample
@@ -875,6 +926,16 @@ if ((await page.locator(".row-master").count()) !== 5) {
 } else {
   ok('fresh reload loads "demo" by default, unaffected by prior mutations');
 }
+if (
+  (await page.locator("#key-select").inputValue()) !== "0" ||
+  (await page.locator("#scale-select").inputValue()) !== "chromatic"
+) {
+  fail(
+    "demo should load with the default Chromatic/C scale, unaffected by this run's D major change",
+  );
+} else {
+  ok("fresh reload's demo resets key/scale to the default (Chromatic/C)");
+}
 
 const patchOptionValue = await page
   .locator("#patch-select option", { hasText: TEST_PATCH_NAME })
@@ -893,6 +954,14 @@ if (!patchOptionValue) {
     );
   } else {
     ok("saved patch round-trips through the backend across a fresh reload");
+  }
+  if (
+    (await page.locator("#key-select").inputValue()) !== "2" ||
+    (await page.locator("#scale-select").inputValue()) !== "major"
+  ) {
+    fail("loaded patch should restore the D major key/scale it was saved with");
+  } else {
+    ok("saved patch round-trips its key/scale through the backend");
   }
 }
 
