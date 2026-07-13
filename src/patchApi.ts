@@ -50,7 +50,20 @@ export interface SampleMetadata {
   name: string;
   mimeType: string;
   createdAt: string;
+  category: string;
 }
+
+/** A curated preset list -- the backend itself doesn't enforce these (see
+ * sampleStore.ts's doc comment), this is purely for a consistent picker
+ * UI rather than every upload inventing its own category spelling. */
+export const SAMPLE_CATEGORIES = [
+  "percussion",
+  "bass",
+  "lead",
+  "pad",
+  "fx",
+  "other",
+] as const;
 
 /** Thrown by savePatch on a 409 (name already exists -- see existingId,
  * for a caller that wants to retry with overwrite: true) or 403 (the
@@ -103,16 +116,24 @@ export async function savePatch(
 export async function uploadSample(
   buffer: AudioBuffer,
   name: string,
+  category = "uncategorized",
 ): Promise<SampleMetadata> {
   const formData = new FormData();
   formData.append("audio", encodeWav(buffer), `${name}.wav`);
   formData.append("name", name);
+  formData.append("category", category);
   const response = await fetch("/api/samples", {
     method: "POST",
     body: formData,
   });
   if (!response.ok) throw new Error("Failed to upload sample");
   return response.json();
+}
+
+export async function listSamples(): Promise<SampleMetadata[]> {
+  const response = await fetch("/api/samples");
+  const body: { samples: SampleMetadata[] } = await response.json();
+  return body.samples;
 }
 
 export async function fetchSampleAudio(id: string): Promise<ArrayBuffer> {

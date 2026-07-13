@@ -436,8 +436,27 @@ export interface GridViewOptions {
    * loading a local file -- gridView.ts stays persistence-agnostic (it
    * doesn't know the backend/patchApi exists at all), so uploading the
    * buffer to get a durable sampleId for patch-saving is entirely main.ts's
-   * business, wired in through this hook. */
-  onSampleLoaded?: (row: Row, buffer: AudioBuffer) => void;
+   * business, wired in through this hook. `category` is whatever the
+   * row's own category picker (see rowPanel) is currently set to. */
+  onSampleLoaded?: (row: Row, buffer: AudioBuffer, category: string) => void;
+  /** The preset category list for the upload-category picker -- a static
+   * UI vocabulary, but injected rather than imported from patchApi.ts to
+   * keep this file from knowing the backend exists at all. Falls back to
+   * a single "other" option if omitted. */
+  sampleCategories?: string[];
+  /** Synchronous read of main.ts's own already-fetched sample list (see
+   * its refreshPatchList-style cache) -- rendering here is fully
+   * synchronous, so this can't be a promise the way the underlying fetch
+   * is. */
+  getAvailableSamples?: () => Array<{
+    id: string;
+    name: string;
+    category: string;
+  }>;
+  /** Loads a previously-uploaded sample from the library onto a row --
+   * main.ts does the fetch+decode+model.loadRowSample+bookkeeping
+   * internally, this hook just triggers it. */
+  onLoadFromLibrary?: (row: Row, sampleId: string) => Promise<void>;
 }
 
 export interface GridViewHandle {
@@ -453,6 +472,12 @@ export function createGridView(
 ): GridViewHandle {
   let selection: Selection = null;
   let cellEls: HTMLDivElement[][] = [];
+  // Keyed by row id rather than held in rowPanel's own locals: rowPanel
+  // reruns from scratch on every render, so anything a user picks ahead of
+  // an action (the category for the *next* upload, which library sample is
+  // currently highlighted) has to live in this outer closure to survive.
+  const pendingUploadCategory = new Map<string, string>();
+  const pendingLibrarySelection = new Map<string, string>();
 
   function select(next: Selection): void {
     selection = next;
@@ -573,6 +598,18 @@ export function createGridView(
     }
 
     if (row.source.needsSample) {
+      const categories = options.sampleCategories ?? ["other"];
+      const uploadCategory = pendingUploadCategory.get(row.id) ?? categories[0];
+
+      fields.push({
+        key: "uploadCategory",
+        label: "Category (for next upload)",
+        kind: "select",
+        value: uploadCategory,
+        options: categories,
+        onChange: (v) => pendingUploadCategory.set(row.id, v),
+      });
+
       fields.push({
         key: "loadSample",
         label: "Load sample…",
@@ -589,7 +626,11 @@ export function createGridView(
             const arrayBuffer = await file.arrayBuffer();
             const buffer = await audioContext.decodeAudioData(arrayBuffer);
             await model.loadRowSample(row, buffer);
-            options.onSampleLoaded?.(row, buffer);
+            options.onSampleLoaded?.(
+              row,
+              buffer,
+              pendingUploadCategory.get(row.id) ?? categories[0],
+            );
             // The waveform range view below only appears once a buffer
             // exists -- nothing to trim a range against before then.
             render();
@@ -597,6 +638,36 @@ export function createGridView(
           input.click();
         },
       });
+
+      const availableSamples = options.getAvailableSamples?.() ?? [];
+      if (availableSamples.length > 0) {
+        const librarySelection =
+          pendingLibrarySelection.get(row.id) ?? availableSamples[0].id;
+
+        fields.push({
+          key: "librarySample",
+          label: "Sample library",
+          kind: "select",
+          value: librarySelection,
+          options: availableSamples.map((s) => ({
+            value: s.id,
+            label: `${s.category} — ${s.name}`,
+          })),
+          onChange: (v) => pendingLibrarySelection.set(row.id, v),
+        });
+
+        fields.push({
+          key: "loadFromLibrary",
+          label: "Load from library",
+          kind: "button",
+          onClick: async () => {
+            const sampleId =
+              pendingLibrarySelection.get(row.id) ?? availableSamples[0].id;
+            await options.onLoadFromLibrary?.(row, sampleId);
+            render();
+          },
+        });
+      }
     }
 
     if (row.config.sourceType === "samplePlayer") {

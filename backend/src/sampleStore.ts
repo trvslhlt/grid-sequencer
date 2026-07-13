@@ -10,6 +10,12 @@ export interface SampleMetadata {
   name: string;
   mimeType: string;
   createdAt: string;
+  /** Free-form -- the frontend offers a curated preset list (percussion/
+   * pad/bass/lead/fx/other) but this store doesn't enforce it, same as it
+   * doesn't validate `name`. Defaults to "uncategorized" for samples
+   * uploaded before this field existed (readSidecar's fallback below) or
+   * whenever a caller omits it. */
+  category: string;
 }
 
 // The sidecar is the source of truth for a sample's audio filename, same
@@ -21,6 +27,7 @@ interface Sidecar {
   filename: string;
   mimeType: string;
   createdAt: string;
+  category?: string;
 }
 
 export async function ensureSamplesDir(): Promise<void> {
@@ -58,6 +65,7 @@ export async function listSamples(): Promise<SampleMetadata[]> {
       name: sidecar.name,
       mimeType: sidecar.mimeType,
       createdAt: sidecar.createdAt,
+      category: sidecar.category ?? "uncategorized",
     });
   }
   return samples;

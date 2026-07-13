@@ -7,8 +7,12 @@ import { GridModel, type Row } from "./grid/gridModel";
 import { SOURCE_TYPE_LABELS, type SourceType } from "./grid/sourceFactory";
 import { type TempoState, applyPatch, serializePatch } from "./patch";
 import {
+  SAMPLE_CATEGORIES,
+  type SampleMetadata,
   SaveConflictError,
+  fetchSampleAudio,
   listPatches,
+  listSamples,
   loadPatch,
   savePatch,
   uploadSample,
@@ -163,12 +167,32 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
   // comment).
   const rowSampleIds = new Map<string, string>();
 
+  // Mirrors refreshPatchList's own cache-then-sync-getter shape: gridView.ts
+  // renders synchronously, so it can't await a fetch mid-render -- main.ts
+  // keeps this populated instead and hands back a plain synchronous getter.
+  let availableSamples: SampleMetadata[] = [];
+  async function refreshAvailableSamples(): Promise<void> {
+    availableSamples = await listSamples();
+  }
+
   const view = createGridView(gridEl, model, {
     buildMasterFields,
-    onSampleLoaded: (row, buffer) => {
-      uploadSample(buffer, row.config.name)
-        .then((meta) => rowSampleIds.set(row.id, meta.id))
+    sampleCategories: [...SAMPLE_CATEGORIES],
+    getAvailableSamples: () => availableSamples,
+    onSampleLoaded: (row, buffer, category) => {
+      uploadSample(buffer, row.config.name, category)
+        .then((meta) => {
+          rowSampleIds.set(row.id, meta.id);
+          return refreshAvailableSamples();
+        })
+        .then(() => view.render())
         .catch((err) => console.error("Failed to upload sample:", err));
+    },
+    onLoadFromLibrary: async (row, sampleId) => {
+      const arrayBuffer = await fetchSampleAudio(sampleId);
+      const buffer = await audioContext.decodeAudioData(arrayBuffer);
+      await model.loadRowSample(row, buffer);
+      rowSampleIds.set(row.id, sampleId);
     },
   });
 
@@ -315,10 +339,18 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
     // Kick and Pad both auto-loaded a placeholder blip in addRow (see its
     // needsSample check) -- upload both so they round-trip through the
     // backend like any other sample, same as a locally-picked file would.
+    const seedCategories: Record<string, string> = {
+      [kickRow.id]: "percussion",
+      [padRow.id]: "pad",
+    };
     for (const row of [kickRow, padRow]) {
       const buffer = model.getRowSampleBuffer(row);
       if (!buffer) continue;
-      const uploaded = await uploadSample(buffer, `${row.config.name} blip`);
+      const uploaded = await uploadSample(
+        buffer,
+        `${row.config.name} blip`,
+        seedCategories[row.id],
+      );
       rowSampleIds.set(row.id, uploaded.id);
     }
 
@@ -337,6 +369,7 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
     patchNameEl.value = demo.name;
   }
   await refreshPatchList();
+  await refreshAvailableSamples();
   view.render();
 
   addRowButtonEl.addEventListener("click", async () => {

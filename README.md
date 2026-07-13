@@ -241,6 +241,15 @@ make run-image-backend
   both the initial playback position and (in looping trigger modes) the
   loop points, so a trimmed, looping range only cycles within the
   selected window rather than looping the whole buffer.
+- **Sample library** (sample rows only): each upload gets tagged with a
+  category (percussion, bass, lead, pad, fx, or other — picked from the
+  "Category (for next upload)" select before hitting "Load sample…"), and
+  every sample ever uploaded — by any row, in any patch — becomes pickable
+  from a row's own "Sample library" dropdown (labeled `category — name`)
+  plus a **Load from library** button, so building a new row doesn't
+  require re-picking a file from disk if something already in the library
+  fits. Loading a local file still works exactly as before; the library is
+  additive, not a replacement.
 - **Per-cell effect chain override** (sample rows only): a cell panel's
   own "Effects" section, same **Override**-button-plus-always-interactive
   pattern as everything else — dial in a cell's chain ahead of time,
@@ -280,7 +289,12 @@ backend as a real WAV (encoded client-side — `src/wavEncoder.ts`'s
 `encodeWav`, ported from `docker_collab`'s own frontend, since
 `AudioBuffer` has no native way to export one) the moment it loads, not
 just at save time — so it has a durable id to reference in the patch
-before you've even decided on a name. `src/patch.ts` converts between
+before you've even decided on a name — and, alongside its category (see
+"Sample library" above; free-form on the backend, `src/patchApi.ts`'s
+`SAMPLE_CATEGORIES` is just a curated preset list for the picker UI), is
+immediately listed for every other needsSample row's library dropdown too
+(`GET /api/samples`), not scoped to the row or patch it was uploaded from.
+`src/patch.ts` converts between
 `GridModel`'s live state and the plain-JSON patch shape the backend
 stores (`serializePatch`/`applyPatch`); a small `Map<rowId, sampleId>` in
 `main.ts` tracks which backend sample each row's currently-loaded buffer

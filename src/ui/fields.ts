@@ -62,7 +62,10 @@ export type Field =
       label: string;
       kind: "select";
       value: string;
-      options: string[];
+      /** Plain strings when the value itself is presentable (e.g.
+       * "lowpass"); {value, label} pairs when it isn't (e.g. a sample's
+       * opaque id needs a human-readable name shown in its place). */
+      options: string[] | { value: string; label: string }[];
       indented?: boolean;
       onChange: (value: string) => void;
     }
@@ -189,10 +192,12 @@ function renderField(container: HTMLElement, field: Field): void {
     if (field.indented) row.classList.add("panel-field-indented");
     const select = document.createElement("select");
     for (const option of field.options) {
+      const { value, label } =
+        typeof option === "string" ? { value: option, label: option } : option;
       const optionEl = document.createElement("option");
-      optionEl.value = option;
-      optionEl.textContent = option;
-      optionEl.selected = option === field.value;
+      optionEl.value = value;
+      optionEl.textContent = label;
+      optionEl.selected = value === field.value;
       select.appendChild(optionEl);
     }
     select.addEventListener("change", () => field.onChange(select.value));

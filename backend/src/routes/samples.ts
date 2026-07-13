@@ -48,6 +48,10 @@ samplesRouter.post("/", upload.single("audio"), async (req, res) => {
     typeof req.body.name === "string" && req.body.name.trim()
       ? req.body.name.trim()
       : `Sample ${new Date().toLocaleTimeString()}`;
+  const category =
+    typeof req.body.category === "string" && req.body.category.trim()
+      ? req.body.category.trim()
+      : "uncategorized";
   const createdAt = new Date().toISOString();
 
   await writeSample(id, filename, req.file.buffer, {
@@ -55,7 +59,10 @@ samplesRouter.post("/", upload.single("audio"), async (req, res) => {
     filename,
     mimeType: req.file.mimetype,
     createdAt,
+    category,
   });
 
-  res.status(201).json({ id, name, mimeType: req.file.mimetype, createdAt });
+  res
+    .status(201)
+    .json({ id, name, mimeType: req.file.mimetype, createdAt, category });
 });

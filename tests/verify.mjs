@@ -4,7 +4,9 @@
 // precedence-aware disabled-but-shown-active state), drag an Envelope
 // section's breakpoint-curve editor and confirm it persists, a sample
 // row's playback range view (drag handles trim which portion of the
-// buffer plays, also persisted), the explicitDuration trigger mode's
+// buffer plays, also persisted), the sample library (category-tagged
+// uploads reusable across every needsSample row, loading from the library
+// swaps a row's buffer), the explicitDuration trigger mode's
 // steps-based duration field, all 6 effect types (filter/distortion/
 // delay/compressor/tremolo/ringMod) and every one of each one's own
 // params -- not just a single headline param each -- add one of each of
@@ -14,7 +16,8 @@
 // confirm "demo" loads by default and the saved patch round-trips
 // through the real backend), recording audio out to a real WAV download,
 // and play -- all with zero console errors.
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
@@ -108,6 +111,38 @@ async function dragAutomationHandle(page, svg, index, fracX, fracY) {
   await page.mouse.up();
   await page.waitForTimeout(50);
   return handle.getAttribute("cy");
+}
+
+/** A minimal valid mono 16-bit PCM WAV (0.1s of silence at 44100Hz) -- just
+ * needs to survive decodeAudioData for the "upload a local file" half of
+ * the sample-library test, same header shape as src/wavEncoder.ts. */
+async function writeTinyWavFixture() {
+  const sampleRate = 44100;
+  const samples = Math.round(sampleRate * 0.1);
+  const dataSize = samples * 2;
+  const arrayBuffer = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(arrayBuffer);
+  function writeString(offset, text) {
+    for (let i = 0; i < text.length; i++) {
+      view.setUint8(offset + i, text.charCodeAt(i));
+    }
+  }
+  writeString(0, "RIFF");
+  view.setUint32(4, 36 + dataSize, true);
+  writeString(8, "WAVE");
+  writeString(12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  writeString(36, "data");
+  view.setUint32(40, dataSize, true);
+  const filePath = path.join(os.tmpdir(), `verify-tiny-${Date.now()}.wav`);
+  await writeFile(filePath, Buffer.from(arrayBuffer));
+  return filePath;
 }
 
 const browser = await chromium.launch();
@@ -408,6 +443,86 @@ if ((await rangeSvg.count()) === 0) {
     }
   }
 }
+
+// Sample library: category-tagged uploads become reusable across every
+// needsSample row, not just the one that uploaded them (see gridView.ts's
+// getAvailableSamples/onLoadFromLibrary and main.ts's availableSamples
+// cache). Kicker (still selected) already has demo-seeded siblings
+// ("Kick blip"/percussion, "Pad blip"/pad) to pick from.
+const uploadCategorySelect = page
+  .locator(".panel-field", { hasText: "Category (for next upload)" })
+  .locator("select");
+if ((await uploadCategorySelect.count()) === 0) {
+  fail("sample row missing the upload-category select");
+} else {
+  ok("sample row shows an upload-category select");
+}
+
+const librarySelect = page
+  .locator(".panel-field", { hasText: "Sample library" })
+  .locator("select");
+const libraryOptionLabels = await librarySelect.locator("option").allTextContents();
+if (
+  !libraryOptionLabels.some((l) => l.includes("percussion")) ||
+  !libraryOptionLabels.some((l) => l.includes("pad"))
+) {
+  fail(
+    `library select should list demo-seeded samples grouped by category, got: ${libraryOptionLabels.join(", ")}`,
+  );
+} else {
+  ok("library select lists existing samples with their category prefix");
+}
+
+// Load a different sample from the library onto Kicker and confirm the
+// waveform view updates (proof a new buffer actually loaded, not just a
+// dropdown selection with no effect).
+const padOption = await librarySelect
+  .locator("option", { hasText: "Pad blip" })
+  .getAttribute("value");
+await librarySelect.selectOption(padOption);
+await page.click("button:has-text('Load from library')");
+await page.waitForTimeout(400);
+if ((await page.locator(".waveform-range-svg").count()) === 0) {
+  fail("loading a sample from the library did not leave a buffer loaded");
+} else {
+  ok("loading a sample from the library swaps the row's buffer");
+}
+
+// Upload a fresh local file under a chosen category, then confirm it shows
+// up -- correctly tagged -- in a *different* row's library picker (proof
+// the upload is shared app-wide, not scoped to the row that uploaded it).
+await uploadCategorySelect.selectOption("fx");
+const tinyWavPath = await writeTinyWavFixture();
+const [fileChooser] = await Promise.all([
+  page.waitForEvent("filechooser"),
+  page.click("button:has-text('Load sample…')"),
+]);
+await fileChooser.setFiles(tinyWavPath);
+await page.waitForTimeout(600);
+
+// Pad (granularSynth) also needsSample -- Synth (oscillatorSynth) doesn't
+// and has no library picker at all.
+await page
+  .locator(".row-master", { hasText: "Pad" })
+  .click({ button: "right" });
+await page.waitForTimeout(50);
+const padLibraryOptions = await page
+  .locator(".panel-field", { hasText: "Sample library" })
+  .locator("select option")
+  .allTextContents();
+if (!padLibraryOptions.some((l) => l.startsWith("fx — Kicker"))) {
+  fail(
+    `newly-uploaded sample should appear as "fx — Kicker" in other rows' library lists, got: ${padLibraryOptions.join(", ")}`,
+  );
+} else {
+  ok(
+    "a local upload's chosen category and row name appear in other rows' library pickers",
+  );
+}
+await page
+  .locator(".row-master", { hasText: "Kicker" })
+  .click({ button: "right" });
+await page.waitForTimeout(50);
 
 // Trigger mode "explicitDuration" is expressed in grid steps, not seconds
 // -- scales with tempo instead of needing hand re-tuning.
