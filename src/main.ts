@@ -170,7 +170,10 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
     on.forEach((isOn, i) => {
       if (isOn) model.setCell(row, i, { on: true });
     });
-    if (sourceType === "samplePlayer") {
+    // needsSample, not sourceType === "samplePlayer" specifically --
+    // granularSynth needs one just as much (its own grain source), and
+    // previously got left silent until a file was picked by hand.
+    if (row.source.needsSample) {
       const blip = generateBlipBuffer(audioContext, 300 + Math.random() * 300);
       await model.loadRowSample(row, blip);
     }
@@ -223,11 +226,13 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
   // The "demo" patch is what loads by default -- seeded into the backend
   // exactly once, the first time this app ever runs against a fresh
   // backend (every later boot finds it already there and skips straight
-  // to loading it). Seeding builds the same 2-row starter content this
-  // app has always shipped, uploads Kick's synthesized blip as a real
-  // sample (so it round-trips through storage like any other sample would
-  // -- there's no special-cased "regenerate this in JS" path on load), and
-  // saves it under the protected name.
+  // to loading it). Exercises all 5 source types across a basic groove
+  // (kick/hats/bass/lead/pad), not just the original 2-row Kick+Synth
+  // starter, so a fresh install actually demonstrates the range of what a
+  // row can be. Uploads every sample-backed row's synthesized blip as a
+  // real sample (so it round-trips through storage like any other sample
+  // would -- there's no special-cased "regenerate this in JS" path on
+  // load), and saves the whole thing under the protected name.
   async function seedDemoIfMissing(): Promise<void> {
     if ((await listPatches()).some((p) => p.name === DEMO_PATCH_NAME)) return;
 
@@ -241,6 +246,30 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
       false,
       false,
     ]);
+    const hatsRow = await addRow("noiseGenerator", "Hats", [
+      true,
+      false,
+      true,
+      false,
+      true,
+      false,
+      true,
+      false,
+    ]);
+    model.setRowDefaultGain(hatsRow, 0.35); // hats sit well back of the kick
+
+    const bassRow = await addRow("fmSynth", "Bass", [
+      true,
+      false,
+      false,
+      true,
+      false,
+      false,
+      true,
+      false,
+    ]);
+    model.setRowDefaultNote(bassRow, 36); // two octaves below the 60 default
+
     await addRow("oscillatorSynth", "Synth", [
       false,
       true,
@@ -252,10 +281,34 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
       false,
     ]);
 
-    const kickBuffer = model.getRowSampleBuffer(kickRow);
-    if (kickBuffer) {
-      const uploaded = await uploadSample(kickBuffer, "Kick blip");
-      rowSampleIds.set(kickRow.id, uploaded.id);
+    const padRow = await addRow("granularSynth", "Pad", [
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+    ]);
+    // A long, loose hold (most of the 8-step cycle) plus a healthy reverb
+    // send -- granular texture reads as atmosphere, not another hit in the
+    // groove, so it's the one row deliberately not locked to the beat.
+    model.setRowTriggerMode(padRow, {
+      kind: "explicitDuration",
+      steps: 6,
+      loop: false,
+    });
+    model.setRowReverbSend(padRow, 0.4);
+
+    // Kick and Pad both auto-loaded a placeholder blip in addRow (see its
+    // needsSample check) -- upload both so they round-trip through the
+    // backend like any other sample, same as a locally-picked file would.
+    for (const row of [kickRow, padRow]) {
+      const buffer = model.getRowSampleBuffer(row);
+      if (!buffer) continue;
+      const uploaded = await uploadSample(buffer, `${row.config.name} blip`);
+      rowSampleIds.set(row.id, uploaded.id);
     }
 
     const patchData = serializePatch(model, currentTempoState(), rowSampleIds);

@@ -129,8 +129,11 @@ make run-image-backend
 
 ## Using the app
 
-- The grid loads with two starter rows ("Kick", a sample row; "Synth", an
-  oscillator row) so it's audible immediately. Hit **Play**.
+- The grid loads a "demo" patch by default — a 5-row groove ("Kick", a
+  sample row; "Hats", noise; "Bass", FM; "Synth", oscillator; "Pad",
+  granular) exercising all 5 source types, so it's audible immediately.
+  Hit **Play**. See "Patch persistence" below for what "demo" means and
+  how to save your own.
 - **Click a cell** to toggle it on/off. **Click a row label** to mute it.
   **Click a column header** to skip that step for every row.
 - **Right-click a cell, row label, or column header** (or the **Master…**

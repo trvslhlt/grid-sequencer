@@ -131,8 +131,8 @@ await page.waitForSelector("#app:not(.hidden)");
 await page.waitForSelector(".row-master");
 
 const rowCount = await page.locator(".row-master").count();
-if (rowCount !== 2) fail(`expected 2 starter rows, found ${rowCount}`);
-else ok("2 starter rows loaded");
+if (rowCount !== 5) fail(`expected 5 starter rows, found ${rowCount}`);
+else ok("5 starter rows loaded");
 
 const columnCount = await page.locator(".column-master").count();
 if (columnCount !== 8) fail(`expected 8 columns, found ${columnCount}`);
@@ -717,8 +717,9 @@ for (const sourceType of ["granularSynth", "noiseGenerator", "fmSynth"]) {
   }
 }
 
-// Patch persistence: save the current (heavily-mutated -- 5 rows, 12
-// columns, row precedence, 160 BPM) state under a fixed name -- re-runs
+// Patch persistence: save the current (heavily-mutated -- 8 rows [demo's
+// own 5 plus the 3 just added above], 12 columns, row precedence, 160
+// BPM) state under a fixed name -- re-runs
 // overwrite it via the same confirm() flow real usage goes through,
 // rather than accumulating a fresh patch on every `make verify`. Reload
 // (a genuinely fresh JS/module context) to prove "demo" loads by default
@@ -752,8 +753,8 @@ await page.waitForSelector(".row-master");
 if ((await page.locator("#patch-name").inputValue()) !== "demo") {
   fail('a fresh reload should load "demo" by default');
 }
-if ((await page.locator(".row-master").count()) !== 2) {
-  fail("demo should be unaffected by this run's mutations (still 2 rows)");
+if ((await page.locator(".row-master").count()) !== 5) {
+  fail("demo should be unaffected by this run's mutations (still 5 rows)");
 } else {
   ok('fresh reload loads "demo" by default, unaffected by prior mutations');
 }
@@ -769,9 +770,9 @@ if (!patchOptionValue) {
   await page.waitForTimeout(500);
   const loadedRowCount = await page.locator(".row-master").count();
   const loadedColumnCount = await page.locator(".column-master").count();
-  if (loadedRowCount !== 5 || loadedColumnCount !== 12) {
+  if (loadedRowCount !== 8 || loadedColumnCount !== 12) {
     fail(
-      `loaded patch state mismatch: expected 5 rows/12 columns, got ${loadedRowCount} rows/${loadedColumnCount} columns`,
+      `loaded patch state mismatch: expected 8 rows/12 columns, got ${loadedRowCount} rows/${loadedColumnCount} columns`,
     );
   } else {
     ok("saved patch round-trips through the backend across a fresh reload");
