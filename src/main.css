@@ -274,6 +274,16 @@ input:disabled {
   align-items: stretch;
 }
 
+/* An effect's own params (see gridView.ts's effectsFields): the effect's
+ * on/off checkbox above reads as a section heading, so these read as
+ * subordinate to it -- pulling the whole label+control group to the right
+ * edge instead of the usual label-left/control-right split gives the
+ * group visual separation from the heading and lines every effect's
+ * sliders up on a consistent right edge. */
+.panel-field-indented {
+  justify-content: flex-end;
+}
+
 .field-value {
   font-variant-numeric: tabular-nums;
   color: #9aa0ac;

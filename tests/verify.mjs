@@ -52,33 +52,34 @@ function section(page, title) {
     },
     // One of an effect's own params (see effectParam below), scoped to
     // this section.
-    effectParam(effectLabel, paramLabel) {
-      return effectParam(root, effectLabel, paramLabel);
+    effectParam(paramLabel) {
+      return effectParam(root, paramLabel);
     },
   };
 }
 
 /** effectsFields (see gridView.ts) renders one checkbox field per effect
  * type -- its label is exactly the effect's name, e.g. "Filter" -- followed
- * by that effect's own params as separate fields labeled "Filter: Cutoff
- * (Hz)" etc. `hasText` alone would also match every one of those param
- * rows (their labels all start with "Filter"), so this needs an *exact*
- * label match to land on the checkbox row specifically. */
+ * by that effect's own params as separate fields, unprefixed (just
+ * "Cutoff (Hz)", not "Filter: Cutoff (Hz)": the checkbox row already
+ * reads as that group's heading). `hasText` alone would also match a
+ * param field whose label happens to *contain* the effect's name, so this
+ * needs an *exact* label match to land on the checkbox row specifically. */
 function effectToggle(scope, effectLabel) {
   return scope
     .locator(`.panel-field:has(label:text-is("${effectLabel}"))`)
     .locator("input[type=checkbox]");
 }
 
-/** One of an effect's own param fields -- labeled "<Effect>: <Param>",
- * e.g. "Filter: Cutoff (Hz)" -- a plain range or select field, always
- * interactive regardless of the effect's own checkbox state (see
- * gridView.ts's effectsFields doc for why that's a deliberate
- * unification, not a bug). */
-function effectParam(scope, effectLabel, paramLabel) {
-  return scope.locator(".panel-field", {
-    hasText: `${effectLabel}: ${paramLabel}`,
-  });
+/** One of an effect's own param fields, by its own (unprefixed) label --
+ * a plain range or select field, always interactive regardless of the
+ * effect's own checkbox state (see gridView.ts's effectsFields doc for
+ * why that's a deliberate unification, not a bug). Every param label is
+ * unique app-wide *except* "Wet", which every effect type has -- scope to
+ * a specific effect's section, or pick a different param, when that
+ * matters. */
+function effectParam(scope, paramLabel) {
+  return scope.locator(".panel-field", { hasText: paramLabel });
 }
 
 /** Drags an automation editor's Nth handle to roughly (fracX, fracY) of the
@@ -362,37 +363,35 @@ await page.waitForTimeout(50);
 
 // Row menu should show all 6 effect types and *all* of each one's own
 // params (not just a single headline param each) -- nothing conditionally
-// appears/disappears as a side effect of *other* fields any more.
+// appears/disappears as a side effect of *other* fields any more. Param
+// labels are unprefixed (no "Filter: " before "Cutoff (Hz)") -- the
+// checkbox row reads as that group's own heading -- so "Wet" only needs
+// checking once even though every effect has one.
 const menuText = await page.locator(".config-panel").innerText();
 const expectedEffectLabels = [
   "Filter",
-  "Filter: Filter type",
-  "Filter: Cutoff (Hz)",
-  "Filter: Resonance (Q)",
-  "Filter: Wet",
+  "Filter type",
+  "Cutoff (Hz)",
+  "Resonance (Q)",
+  "Wet",
   "Distortion",
-  "Distortion: Amount",
-  "Distortion: Output gain",
-  "Distortion: Wet",
+  "Amount",
+  "Output gain",
   "Delay",
-  "Delay: Time (ms)",
-  "Delay: Feedback",
-  "Delay: Wet",
+  "Time (ms)",
+  "Feedback",
   "Compressor",
-  "Compressor: Threshold (dB)",
-  "Compressor: Ratio",
-  "Compressor: Attack (ms)",
-  "Compressor: Release (ms)",
-  "Compressor: Wet",
+  "Threshold (dB)",
+  "Ratio",
+  "Attack (ms)",
+  "Release (ms)",
   "Tremolo",
-  "Tremolo: Rate (Hz)",
-  "Tremolo: Depth",
-  "Tremolo: LFO shape",
-  "Tremolo: Wet",
+  "Rate (Hz)",
+  "Depth",
+  "LFO shape",
   "Ring Mod",
-  "Ring Mod: Frequency (Hz)",
-  "Ring Mod: Carrier shape",
-  "Ring Mod: Wet",
+  "Frequency (Hz)",
+  "Carrier shape",
 ];
 for (const label of expectedEffectLabels) {
   if (!menuText.includes(label))
@@ -401,7 +400,7 @@ for (const label of expectedEffectLabels) {
 ok("row panel shows every effect type and all of each one's own params");
 
 const filterToggle = effectToggle(page, "Filter");
-const filterCutoff = effectParam(page, "Filter", "Cutoff (Hz)");
+const filterCutoff = effectParam(page, "Cutoff (Hz)");
 const filterCutoffInput = filterCutoff.locator("input[type=range]");
 if (await filterCutoffInput.isDisabled()) {
   fail("Filter's param controls should always be interactive, checkbox or not");
@@ -416,9 +415,7 @@ await page.waitForTimeout(50);
 // value handler closed over the pre-toggle effects array. Reselecting
 // away and back forces a render from live model state, exposing the bug
 // if it's back.
-const filterTypeSelect = effectParam(page, "Filter", "Filter type").locator(
-  "select",
-);
+const filterTypeSelect = effectParam(page, "Filter type").locator("select");
 await filterTypeSelect.selectOption("highpass");
 await filterCutoffInput.evaluate((el) => {
   el.value = "3500";
@@ -437,16 +434,15 @@ if (!(await effectToggle(page, "Filter").isChecked())) {
   fail("effect toggle+drag reverted the toggle (stale-closure regression)");
 }
 if (
-  (await effectParam(page, "Filter", "Cutoff (Hz)")
+  (await effectParam(page, "Cutoff (Hz)")
     .locator("input[type=range]")
     .inputValue()) !== "3500"
 ) {
   fail("effect param value did not persist after toggle+drag");
 }
 if (
-  (await effectParam(page, "Filter", "Filter type")
-    .locator("select")
-    .inputValue()) !== "highpass"
+  (await effectParam(page, "Filter type").locator("select").inputValue()) !==
+  "highpass"
 ) {
   fail("effect select-kind param value did not persist after toggle+drag");
 } else {
@@ -505,7 +501,7 @@ if (
   fail("cell Effects section should start dimmed (override off)");
 }
 const cellFilterCutoffInput = cellEffects
-  .effectParam("Filter", "Cutoff (Hz)")
+  .effectParam("Cutoff (Hz)")
   .locator("input[type=range]");
 if (await cellFilterCutoffInput.isDisabled()) {
   fail("dimmed cell effects controls should stay interactive, not disabled");
@@ -543,7 +539,7 @@ if (!(await cellEffectsAfter.effectToggle("Filter").isChecked())) {
   );
 }
 const cellFilterCutoffAfter = await cellEffectsAfter
-  .effectParam("Filter", "Cutoff (Hz)")
+  .effectParam("Cutoff (Hz)")
   .locator("input[type=range]")
   .inputValue();
 if (cellFilterCutoffAfter !== "2200") {

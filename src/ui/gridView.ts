@@ -339,8 +339,12 @@ export function effectsFields(
       },
     });
     for (const param of effect.params) {
+      // No "Effect: " prefix -- the checkbox field above already reads as
+      // this group's own heading (see effect.label there), so repeating
+      // the effect's name on every param below it is redundant. Right-
+      // aligning the row (see fields.ts's `indented`) is what gives the
+      // group its visual separation from the heading instead.
       const key = `${effect.type}-${param.key}`;
-      const label = `${effect.label}: ${param.label}`;
       const stored = spec?.params[param.key];
       const onChange = (v: number | string) => {
         const current = getEffects();
@@ -355,10 +359,11 @@ export function effectsFields(
       if (param.kind === "select") {
         fields.push({
           key,
-          label,
+          label: param.label,
           kind: "select",
           value: typeof stored === "string" ? stored : param.default,
           options: param.options,
+          indented: true,
           onChange,
         });
       } else {
@@ -371,12 +376,13 @@ export function effectsFields(
           typeof stored === "number" ? stored : param.default;
         fields.push({
           key,
-          label,
+          label: param.label,
           kind: "range",
           value: storedNumber * scale,
           min: param.min,
           max: param.max,
           step: param.step,
+          indented: true,
           onChange: (v) => onChange(v / scale),
         });
       }

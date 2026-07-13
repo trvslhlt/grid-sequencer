@@ -44,6 +44,12 @@ export type Field =
       min: number;
       max: number;
       step: number;
+      /** Right-aligns the whole row (label + control together) instead of
+       * the usual label-left/control-right split -- for a group of fields
+       * that already reads as visually subordinate to a heading field
+       * above them (see gridView.ts's effectsFields), not a general
+       * layout option every field needs. */
+      indented?: boolean;
       onChange: (value: number) => void;
     }
   | {
@@ -52,6 +58,7 @@ export type Field =
       kind: "select";
       value: string;
       options: string[];
+      indented?: boolean;
       onChange: (value: string) => void;
     }
   | {
@@ -163,6 +170,7 @@ function renderField(container: HTMLElement, field: Field): void {
     input.addEventListener("change", () => field.onChange(input.checked));
     row.appendChild(input);
   } else if (field.kind === "select") {
+    if (field.indented) row.classList.add("panel-field-indented");
     const select = document.createElement("select");
     for (const option of field.options) {
       const optionEl = document.createElement("option");
@@ -180,6 +188,7 @@ function renderField(container: HTMLElement, field: Field): void {
     input.addEventListener("change", () => field.onChange(input.value));
     row.appendChild(input);
   } else if (field.kind === "range") {
+    if (field.indented) row.classList.add("panel-field-indented");
     const { input, valueEl } = renderRangeInput(
       field.value,
       field.min,
