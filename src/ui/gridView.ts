@@ -1,5 +1,4 @@
-import type { EffectSpec, EffectType } from "../grid/config";
-import { BUILT_INS } from "../grid/gridModel";
+import type { EffectSpec, EffectType, EnvelopeParams } from "../grid/config";
 import type { GridModel, Row } from "../grid/gridModel";
 import { SOURCE_TYPE_LABELS } from "../grid/sourceFactory";
 import {
@@ -109,6 +108,51 @@ export function effectsFields(
   });
 }
 
+const ENVELOPE_FIELD_SPECS: Array<{
+  key: keyof EnvelopeParams;
+  label: string;
+  min: number;
+  max: number;
+  step: number;
+}> = [
+  { key: "attackMs", label: "Attack (ms)", min: 0, max: 500, step: 1 },
+  { key: "decayMs", label: "Decay (ms)", min: 0, max: 1000, step: 5 },
+  { key: "sustainLevel", label: "Sustain level", min: 0, max: 1, step: 0.01 },
+  { key: "releaseMs", label: "Release (ms)", min: 0, max: 1000, step: 1 },
+];
+
+/** Envelope is always a single consolidated override (like row/column
+ * Defaults, unlike note/gain/gate/time-shift's per-field checkboxes) --
+ * all 4 ADSR fields are plain always-interactive controls, gated by one
+ * section-level toggle the caller supplies via `onChange`'s wiring. */
+function envelopeFields(
+  envelope: EnvelopeParams,
+  onChange: (patch: Partial<EnvelopeParams>) => void,
+): Field[] {
+  return ENVELOPE_FIELD_SPECS.map((spec) => ({
+    key: spec.key,
+    label: spec.label,
+    kind: "range",
+    value: envelope[spec.key],
+    min: spec.min,
+    max: spec.max,
+    step: spec.step,
+    onChange: (v) => onChange({ [spec.key]: v }),
+  }));
+}
+
+interface PanelSection {
+  title: string;
+  fields: Field[];
+  toggle?: { active: boolean; disabled?: boolean; onClick: () => void };
+}
+
+interface PanelContent {
+  title: string;
+  fields: Field[];
+  sections: PanelSection[];
+}
+
 type Selection =
   | { kind: "row"; rowId: string }
   | { kind: "column"; columnIndex: number }
@@ -139,7 +183,7 @@ export function createGridView(
     render();
   }
 
-  function rowFields(row: Row): Field[] {
+  function rowPanel(row: Row): PanelContent {
     const fields: Field[] = [
       {
         key: "name",
@@ -215,76 +259,16 @@ export function createGridView(
       });
     }
 
-    fields.push(
-      {
-        key: "defaultNote",
-        label: "Default note",
-        kind: "override",
-        overridden: row.config.defaultNote !== undefined,
-        value: row.config.defaultNote ?? BUILT_INS.note,
-        min: 0,
-        max: 127,
-        step: 1,
-        onToggle: (on) => {
-          model.setRowDefaultNote(
-            row,
-            on ? (row.config.defaultNote ?? BUILT_INS.note) : undefined,
-          );
-          render();
-        },
-        onChange: (v) => model.setRowDefaultNote(row, v),
-      },
-      {
-        key: "defaultGain",
-        label: "Default gain",
-        kind: "override",
-        overridden: row.config.defaultGain !== undefined,
-        value: row.config.defaultGain ?? BUILT_INS.gain,
-        min: 0,
-        max: 1,
-        step: 0.01,
-        onToggle: (on) => {
-          model.setRowDefaultGain(
-            row,
-            on ? (row.config.defaultGain ?? BUILT_INS.gain) : undefined,
-          );
-          render();
-        },
-        onChange: (v) => model.setRowDefaultGain(row, v),
-      },
-      {
-        key: "timeShift",
-        label: "Default nudge (ms)",
-        kind: "override",
-        overridden: row.config.defaultTimeShiftSeconds !== undefined,
-        value: (row.config.defaultTimeShiftSeconds ?? 0) * 1000,
-        min: -100,
-        max: 100,
-        step: 5,
-        onToggle: (on) => {
-          model.setRowDefaultTimeShift(
-            row,
-            on ? (row.config.defaultTimeShiftSeconds ?? 0) : undefined,
-          );
-          render();
-        },
-        onChange: (v) => model.setRowDefaultTimeShift(row, v / 1000),
-      },
-      {
-        key: "reverbSend",
-        label: "Reverb send",
-        kind: "range",
-        value: row.config.reverbSend,
-        min: 0,
-        max: 1,
-        step: 0.01,
-        onChange: (v) => model.setRowReverbSend(row, v),
-      },
-      ...effectsFields(
-        () => model.getRow(row.id)?.config.effects ?? [],
-        (next) => model.setRowEffects(row, next),
-      ),
-    );
+    fields.push({
+      key: "reverbSend",
+      label: "Reverb send",
+      kind: "range",
+      value: row.config.reverbSend,
+      min: 0,
+      max: 1,
+      step: 0.01,
+      onChange: (v) => model.setRowReverbSend(row, v),
+    });
 
     const sourceParams = row.source.getParams();
     for (const field of row.source.paramFields) {
@@ -345,109 +329,185 @@ export function createGridView(
       },
     });
 
-    return fields;
+    // The winning side's Defaults/Envelope override is disabled: with
+    // global precedence already deciding this row vs. any column it
+    // shares a field with, an explicit override here can't change the
+    // outcome -- it's the *losing* side that needs one to make its own
+    // values matter at all.
+    const defaultsDisabled = model.precedence === "row";
+
+    return {
+      title: `Row: ${row.config.name}`,
+      fields,
+      sections: [
+        {
+          title: "Defaults",
+          toggle: {
+            active: row.config.defaultsOverride,
+            disabled: defaultsDisabled,
+            onClick: () => {
+              model.setRowDefaultsOverride(row, !row.config.defaultsOverride);
+              render();
+            },
+          },
+          fields: [
+            {
+              key: "defaultNote",
+              label: "Default note",
+              kind: "number",
+              value: row.config.defaultNote,
+              min: 0,
+              max: 127,
+              step: 1,
+              onChange: (v) => model.setRowDefaultNote(row, v),
+            },
+            {
+              key: "defaultGain",
+              label: "Default gain",
+              kind: "range",
+              value: row.config.defaultGain,
+              min: 0,
+              max: 1,
+              step: 0.01,
+              onChange: (v) => model.setRowDefaultGain(row, v),
+            },
+            {
+              key: "timeShift",
+              label: "Default nudge (ms)",
+              kind: "range",
+              value: row.config.defaultTimeShiftSeconds * 1000,
+              min: -100,
+              max: 100,
+              step: 5,
+              onChange: (v) => model.setRowDefaultTimeShift(row, v / 1000),
+            },
+          ],
+        },
+        {
+          title: "Envelope",
+          toggle: {
+            active: row.config.envelopeOverride,
+            disabled: defaultsDisabled,
+            onClick: () => {
+              model.setRowEnvelopeOverride(row, !row.config.envelopeOverride);
+              render();
+            },
+          },
+          fields: envelopeFields(row.config.envelope, (patch) =>
+            model.setRowEnvelope(row, patch),
+          ),
+        },
+        {
+          title: "Effects",
+          fields: effectsFields(
+            () => model.getRow(row.id)?.config.effects ?? [],
+            (next) => model.setRowEffects(row, next),
+          ),
+        },
+      ],
+    };
   }
 
-  function columnFields(columnIndex: number): Field[] {
+  function columnPanel(columnIndex: number): PanelContent {
     const column = model.columns[columnIndex];
-    return [
-      {
-        key: "enabled",
-        label: "Enabled (not skipped)",
-        kind: "checkbox",
-        value: column.enabled,
-        onChange: (v) => {
-          model.setColumn(columnIndex, { enabled: v });
-          render();
+    const defaultsDisabled = model.precedence === "column";
+
+    return {
+      title: `Column ${columnIndex + 1}`,
+      fields: [
+        {
+          key: "enabled",
+          label: "Enabled (not skipped)",
+          kind: "checkbox",
+          value: column.enabled,
+          onChange: (v) => {
+            model.setColumn(columnIndex, { enabled: v });
+            render();
+          },
         },
-      },
-      {
-        key: "defaultNote",
-        label: "Default note",
-        kind: "override",
-        overridden: column.defaultNote !== undefined,
-        value: column.defaultNote ?? BUILT_INS.note,
-        min: 0,
-        max: 127,
-        step: 1,
-        onToggle: (on) => {
-          model.setColumn(columnIndex, {
-            defaultNote: on
-              ? (column.defaultNote ?? BUILT_INS.note)
-              : undefined,
-          });
-          render();
+      ],
+      sections: [
+        {
+          title: "Defaults",
+          toggle: {
+            active: column.defaultsOverride,
+            disabled: defaultsDisabled,
+            onClick: () => {
+              model.setColumn(columnIndex, {
+                defaultsOverride: !column.defaultsOverride,
+              });
+              render();
+            },
+          },
+          fields: [
+            {
+              key: "defaultNote",
+              label: "Default note",
+              kind: "number",
+              value: column.defaultNote,
+              min: 0,
+              max: 127,
+              step: 1,
+              onChange: (v) => model.setColumn(columnIndex, { defaultNote: v }),
+            },
+            {
+              key: "defaultGain",
+              label: "Default gain",
+              kind: "range",
+              value: column.defaultGain,
+              min: 0,
+              max: 1,
+              step: 0.01,
+              onChange: (v) => model.setColumn(columnIndex, { defaultGain: v }),
+            },
+            {
+              key: "defaultGate",
+              label: "Default gate",
+              kind: "range",
+              value: column.defaultGate,
+              min: 0,
+              max: 4,
+              step: 0.05,
+              onChange: (v) => model.setColumn(columnIndex, { defaultGate: v }),
+            },
+            {
+              key: "defaultShift",
+              label: "Default nudge (ms)",
+              kind: "range",
+              value: column.defaultTimeShiftSeconds * 1000,
+              min: -100,
+              max: 100,
+              step: 5,
+              onChange: (v) =>
+                model.setColumn(columnIndex, {
+                  defaultTimeShiftSeconds: v / 1000,
+                }),
+            },
+          ],
         },
-        onChange: (v) => model.setColumn(columnIndex, { defaultNote: v }),
-      },
-      {
-        key: "defaultGain",
-        label: "Default gain",
-        kind: "override",
-        overridden: column.defaultGain !== undefined,
-        value: column.defaultGain ?? BUILT_INS.gain,
-        min: 0,
-        max: 1,
-        step: 0.01,
-        onToggle: (on) => {
-          model.setColumn(columnIndex, {
-            defaultGain: on
-              ? (column.defaultGain ?? BUILT_INS.gain)
-              : undefined,
-          });
-          render();
+        {
+          title: "Envelope",
+          toggle: {
+            active: column.envelopeOverride,
+            disabled: defaultsDisabled,
+            onClick: () => {
+              model.setColumn(columnIndex, {
+                envelopeOverride: !column.envelopeOverride,
+              });
+              render();
+            },
+          },
+          fields: envelopeFields(column.envelope, (patch) =>
+            model.setColumn(columnIndex, {
+              envelope: { ...column.envelope, ...patch },
+            }),
+          ),
         },
-        onChange: (v) => model.setColumn(columnIndex, { defaultGain: v }),
-      },
-      {
-        key: "defaultGate",
-        label: "Default gate",
-        kind: "override",
-        overridden: column.defaultGate !== undefined,
-        value: column.defaultGate ?? BUILT_INS.gate,
-        min: 0,
-        max: 4,
-        step: 0.05,
-        onToggle: (on) => {
-          model.setColumn(columnIndex, {
-            defaultGate: on
-              ? (column.defaultGate ?? BUILT_INS.gate)
-              : undefined,
-          });
-          render();
-        },
-        onChange: (v) => model.setColumn(columnIndex, { defaultGate: v }),
-      },
-      {
-        key: "defaultShift",
-        label: "Default nudge (ms)",
-        kind: "override",
-        overridden: column.defaultTimeShiftSeconds !== undefined,
-        value: (column.defaultTimeShiftSeconds ?? 0) * 1000,
-        min: -100,
-        max: 100,
-        step: 5,
-        onToggle: (on) => {
-          model.setColumn(columnIndex, {
-            defaultTimeShiftSeconds: on
-              ? (column.defaultTimeShiftSeconds ?? 0)
-              : undefined,
-          });
-          render();
-        },
-        onChange: (v) =>
-          model.setColumn(columnIndex, { defaultTimeShiftSeconds: v / 1000 }),
-      },
-    ];
+      ],
+    };
   }
 
-  interface CellPanel {
-    fields: Field[];
-    headerButton?: { label: string; active: boolean; onClick: () => void };
-    dimmedSection?: { fields: Field[]; dimmed: boolean };
-  }
-
-  function cellFields(row: Row, columnIndex: number): CellPanel {
+  function cellPanel(row: Row, columnIndex: number): PanelContent {
     const cell = row.cells[columnIndex];
     const resolved = model.resolveCell(row, columnIndex);
     const fields: Field[] = [
@@ -532,68 +592,82 @@ export function createGridView(
       },
     ];
 
-    if (row.config.sourceType !== "samplePlayer") {
-      return { fields };
-    }
-
-    return {
-      fields,
-      headerButton: {
-        label: "Override",
-        active: cell.effectsOverride,
-        onClick: () => {
-          model.setCell(row, columnIndex, {
-            effectsOverride: !cell.effectsOverride,
-          });
-          render();
+    const sections: PanelSection[] = [
+      {
+        title: "Envelope",
+        toggle: {
+          active: cell.envelopeOverride,
+          onClick: () => {
+            model.setCell(row, columnIndex, {
+              envelopeOverride: !cell.envelopeOverride,
+            });
+            render();
+          },
         },
+        fields: envelopeFields(cell.envelope, (patch) =>
+          model.setCell(row, columnIndex, {
+            envelope: { ...cell.envelope, ...patch },
+          }),
+        ),
       },
-      // Always shown and always interactive, even while inactive -- so a
-      // cell's chain can be dialed in ahead of time, silently, and
-      // switched on later with a single click instead of building it from
-      // scratch under time pressure. `dimmed` is purely visual (see
-      // main.css's .dimmed-section); it never disables the controls.
-      dimmedSection: {
+    ];
+
+    if (row.config.sourceType === "samplePlayer") {
+      sections.push({
+        title: "Effects",
+        toggle: {
+          active: cell.effectsOverride,
+          onClick: () => {
+            model.setCell(row, columnIndex, {
+              effectsOverride: !cell.effectsOverride,
+            });
+            render();
+          },
+        },
+        // Always shown and always interactive, even while inactive -- so
+        // a cell's chain can be dialed in ahead of time, silently, and
+        // switched on later with a single click instead of building it
+        // from scratch under time pressure. Dimming is purely visual
+        // (main.css's .dimmed-section); it never disables the controls.
         fields: effectsFields(
           () => row.cells[columnIndex].effects,
           (next) => model.setCell(row, columnIndex, { effects: next }),
           { alwaysInteractive: true },
         ),
-        dimmed: !cell.effectsOverride,
-      },
+      });
+    }
+
+    return {
+      title: `Cell: ${row.config.name} × col ${columnIndex + 1}`,
+      fields,
+      sections,
     };
   }
 
-  interface PanelContent extends CellPanel {
-    title: string;
-  }
-
-  function panelTitleAndFields(rows: Row[]): PanelContent {
+  function panelContent(rows: Row[]): PanelContent {
     if (selection === null) {
-      return { title: "Nothing selected", fields: [] };
+      return { title: "Nothing selected", fields: [], sections: [] };
     }
     if (selection.kind === "master") {
-      return { title: "Master", fields: options.buildMasterFields() };
+      return {
+        title: "Master",
+        fields: options.buildMasterFields(),
+        sections: [],
+      };
     }
     if (selection.kind === "column") {
-      return {
-        title: `Column ${selection.columnIndex + 1}`,
-        fields: columnFields(selection.columnIndex),
-      };
+      return columnPanel(selection.columnIndex);
     }
     const targetRowId = selection.rowId;
     const row = rows.find((r) => r.id === targetRowId);
     if (!row) {
       selection = null;
-      return { title: "Nothing selected", fields: [] };
+      return { title: "Nothing selected", fields: [], sections: [] };
     }
     if (selection.kind === "row") {
-      return { title: `Row: ${row.config.name}`, fields: rowFields(row) };
+      return rowPanel(row);
     }
-    return {
-      title: `Cell: ${row.config.name} × col ${selection.columnIndex + 1}`,
-      ...cellFields(row, selection.columnIndex),
-    };
+    return cellPanel(row, selection.columnIndex);
   }
 
   function render(): void {
@@ -653,6 +727,7 @@ export function createGridView(
           cell.gain !== undefined ||
           cell.gate !== undefined ||
           cell.timeShiftSeconds !== undefined ||
+          cell.envelopeOverride ||
           cell.effectsOverride;
         const cellSelected =
           selection?.kind === "cell" &&
@@ -675,8 +750,7 @@ export function createGridView(
 
     const panel = document.createElement("div");
     panel.className = "config-panel";
-    const { title, fields, headerButton, dimmedSection } =
-      panelTitleAndFields(rows);
+    const { title, fields, sections } = panelContent(rows);
 
     const heading = document.createElement("div");
     heading.className = "panel-title-row";
@@ -684,33 +758,53 @@ export function createGridView(
     headingTitle.className = "panel-title";
     headingTitle.textContent = title;
     heading.appendChild(headingTitle);
-    if (headerButton) {
-      const button = document.createElement("button");
-      button.className = `panel-header-button${headerButton.active ? " active" : ""}`;
-      button.textContent = headerButton.label;
-      button.addEventListener("click", headerButton.onClick);
-      heading.appendChild(button);
-    }
     panel.appendChild(heading);
 
-    if (fields.length === 0 && !dimmedSection && selection === null) {
+    if (fields.length === 0 && sections.length === 0 && selection === null) {
       const hint = document.createElement("p");
       hint.className = "panel-hint";
       hint.textContent =
         "Right-click a cell, a row label, or a column header to edit it here.";
       panel.appendChild(hint);
     } else {
-      const body = document.createElement("div");
-      body.className = "panel-body";
-      renderFields(body, fields);
-      panel.appendChild(body);
-    }
+      if (fields.length > 0) {
+        const body = document.createElement("div");
+        body.className = "panel-body";
+        renderFields(body, fields);
+        panel.appendChild(body);
+      }
 
-    if (dimmedSection) {
-      const section = document.createElement("div");
-      section.className = `panel-body dimmed-section${dimmedSection.dimmed ? " dimmed" : ""}`;
-      renderFields(section, dimmedSection.fields);
-      panel.appendChild(section);
+      for (const section of sections) {
+        const sectionEl = document.createElement("div");
+        sectionEl.className = "panel-section";
+
+        const sectionHeading = document.createElement("div");
+        sectionHeading.className = "panel-section-title-row";
+        const sectionTitle = document.createElement("span");
+        sectionTitle.className = "panel-section-title";
+        sectionTitle.textContent = section.title;
+        sectionHeading.appendChild(sectionTitle);
+        if (section.toggle) {
+          const button = document.createElement("button");
+          button.className = `panel-header-button${section.toggle.active ? " active" : ""}`;
+          button.textContent = "Override";
+          button.disabled = section.toggle.disabled ?? false;
+          button.title = button.disabled
+            ? "Already wins by the global row/column precedence setting -- an override here can't change that."
+            : "";
+          button.addEventListener("click", section.toggle.onClick);
+          sectionHeading.appendChild(button);
+        }
+        sectionEl.appendChild(sectionHeading);
+
+        const sectionBody = document.createElement("div");
+        const dimmed = section.toggle ? !section.toggle.active : false;
+        sectionBody.className = `panel-body dimmed-section${dimmed ? " dimmed" : ""}`;
+        renderFields(sectionBody, section.fields);
+        sectionEl.appendChild(sectionBody);
+
+        panel.appendChild(sectionEl);
+      }
     }
 
     layout.appendChild(grid);

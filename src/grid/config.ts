@@ -14,6 +14,19 @@ export interface EffectSpec {
   params: Record<string, number | string>;
 }
 
+/** Same shape as bruit-kit's AdsrParams (sources/envelope.ts), redeclared
+ * locally so this file doesn't reach into bruit-kit for one structural
+ * type -- gridModel.ts, which already imports AdsrParams to talk to
+ * sources/ directly, passes a ResolvedCellConfig.envelope straight through
+ * to a source's setParams(), where structural typing makes the two
+ * interchangeable with no conversion. */
+export interface EnvelopeParams {
+  attackMs: number;
+  decayMs: number;
+  sustainLevel: number;
+  releaseMs: number;
+}
+
 /** Which of row/column wins when both set a default for the same field —
  * configurable per PLAN.md's cascade section, default "row". On/off has no
  * entry here: it's always per-cell, never defaulted from row or column. */
@@ -30,15 +43,17 @@ export interface RowConfig {
    * the resolved cascade note like a synth-like row. Ignored by every
    * other source type, which are inherently pitched. */
   playbackMode: "direct" | "pitched";
-  /** All three defaults below are optional -- a row that doesn't set one
-   * falls through to the column default (or built-in), same override
-   * relationship column defaults have to cell overrides. Whether a row
-   * currently sets a given default is exactly what an "override" checkbox
-   * in the UI reflects; there's no separate "is this overridden" flag to
-   * keep in sync. */
-  defaultNote: number | undefined;
-  defaultGain: number | undefined;
-  defaultTimeShiftSeconds: number | undefined;
+  /** One toggle governs all three defaults together (see the panel's
+   * single "Override" button per row/column) -- they're always-present
+   * values, editable and previewable whether or not this row currently
+   * contributes them to the cascade, same reasoning as CellConfig.effects
+   * staying live while effectsOverride is off. */
+  defaultsOverride: boolean;
+  defaultNote: number;
+  defaultGain: number;
+  defaultTimeShiftSeconds: number;
+  envelopeOverride: boolean;
+  envelope: EnvelopeParams;
   /** This row's persistent effect chain, built once and never torn down
    * until the row is removed (see effectsChain.ts). */
   effects: EffectSpec[];
@@ -49,10 +64,13 @@ export interface ColumnConfig {
   /** Column-master on/off: false skips this step index for every row,
    * regardless of any row's own cell state. */
   enabled: boolean;
-  defaultNote: number | undefined;
-  defaultGain: number | undefined;
-  defaultGate: number | undefined;
-  defaultTimeShiftSeconds: number | undefined;
+  defaultsOverride: boolean;
+  defaultNote: number;
+  defaultGain: number;
+  defaultGate: number;
+  defaultTimeShiftSeconds: number;
+  envelopeOverride: boolean;
+  envelope: EnvelopeParams;
 }
 
 export interface CellConfig {
@@ -62,6 +80,8 @@ export interface CellConfig {
   gain: number | undefined;
   gate: number | undefined;
   timeShiftSeconds: number | undefined;
+  envelopeOverride: boolean;
+  envelope: EnvelopeParams;
   /** This cell's own would-be effect chain -- always present (not
    * undefined) so it can be edited and previewed while `effectsOverride`
    * is off, same as every other override's value control stays live
@@ -84,6 +104,7 @@ export interface ResolvedCellConfig {
   gain: number;
   gate: number;
   timeShiftSeconds: number;
+  envelope: EnvelopeParams;
   effects: EffectSpec[];
 }
 
@@ -92,6 +113,7 @@ export interface BuiltInDefaults {
   gain: number;
   gate: number;
   timeShiftSeconds: number;
+  envelope: EnvelopeParams;
 }
 
 function pick(
@@ -109,6 +131,48 @@ function pick(
   return builtIn;
 }
 
+function pickEnvelope(
+  cell: { envelopeOverride: boolean; envelope: EnvelopeParams },
+  row: { envelopeOverride: boolean; envelope: EnvelopeParams },
+  column: { envelopeOverride: boolean; envelope: EnvelopeParams },
+  precedence: Precedence,
+  builtIn: EnvelopeParams,
+): EnvelopeParams {
+  const rowEnv = row.envelopeOverride ? row.envelope : undefined;
+  const columnEnv = column.envelopeOverride ? column.envelope : undefined;
+  const cellEnv = cell.envelopeOverride ? cell.envelope : undefined;
+  return {
+    attackMs: pick(
+      cellEnv?.attackMs,
+      rowEnv?.attackMs,
+      columnEnv?.attackMs,
+      precedence,
+      builtIn.attackMs,
+    ),
+    decayMs: pick(
+      cellEnv?.decayMs,
+      rowEnv?.decayMs,
+      columnEnv?.decayMs,
+      precedence,
+      builtIn.decayMs,
+    ),
+    sustainLevel: pick(
+      cellEnv?.sustainLevel,
+      rowEnv?.sustainLevel,
+      columnEnv?.sustainLevel,
+      precedence,
+      builtIn.sustainLevel,
+    ),
+    releaseMs: pick(
+      cellEnv?.releaseMs,
+      rowEnv?.releaseMs,
+      columnEnv?.releaseMs,
+      precedence,
+      builtIn.releaseMs,
+    ),
+  };
+}
+
 export function resolveCellConfig(
   cell: CellConfig,
   row: RowConfig,
@@ -121,36 +185,55 @@ export function resolveCellConfig(
    * module reaching for stepSeconds itself. */
   rowDefaultGate: number,
 ): ResolvedCellConfig {
+  const rowDefaultNote = row.defaultsOverride ? row.defaultNote : undefined;
+  const rowDefaultGain = row.defaultsOverride ? row.defaultGain : undefined;
+  const rowDefaultShift = row.defaultsOverride
+    ? row.defaultTimeShiftSeconds
+    : undefined;
+  const columnDefaultNote = column.defaultsOverride
+    ? column.defaultNote
+    : undefined;
+  const columnDefaultGain = column.defaultsOverride
+    ? column.defaultGain
+    : undefined;
+  const columnDefaultGate = column.defaultsOverride
+    ? column.defaultGate
+    : undefined;
+  const columnDefaultShift = column.defaultsOverride
+    ? column.defaultTimeShiftSeconds
+    : undefined;
+
   return {
     fires: cell.on && row.enabled && column.enabled,
     note: pick(
       cell.note,
-      row.defaultNote,
-      column.defaultNote,
+      rowDefaultNote,
+      columnDefaultNote,
       precedence,
       builtIns.note,
     ),
     gain: pick(
       cell.gain,
-      row.defaultGain,
-      column.defaultGain,
+      rowDefaultGain,
+      columnDefaultGain,
       precedence,
       builtIns.gain,
     ),
     gate: pick(
       cell.gate,
       rowDefaultGate,
-      column.defaultGate,
+      columnDefaultGate,
       precedence,
       builtIns.gate,
     ),
     timeShiftSeconds: pick(
       cell.timeShiftSeconds,
-      row.defaultTimeShiftSeconds,
-      column.defaultTimeShiftSeconds,
+      rowDefaultShift,
+      columnDefaultShift,
       precedence,
       builtIns.timeShiftSeconds,
     ),
+    envelope: pickEnvelope(cell, row, column, precedence, builtIns.envelope),
     effects: cell.effectsOverride ? cell.effects : row.effects,
   };
 }

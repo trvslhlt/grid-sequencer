@@ -1,8 +1,10 @@
 // Manual (non-CI) golden-path browser check: unlock audio, toggle cells,
 // select each panel kind (cell/row/column/master) and exercise its
-// override fields, add one of each of the 5 source types (GranularSynth
-// exercises its async worklet init), flip row/column precedence, tempo,
-// and step count, and play -- all with zero console errors.
+// override fields and sections (Defaults/Envelope/Effects, including the
+// precedence-aware disabled state), add one of each of the 5 source types
+// (GranularSynth exercises its async worklet init), flip row/column
+// precedence, tempo, and step count, and play -- all with zero console
+// errors.
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
@@ -23,13 +25,29 @@ function ok(message) {
 
 /** An "override" field is a checkbox + a value control together (see
  * fields.ts) -- this locator scoping matches both without depending on
- * DOM order. */
+ * DOM order. Used by cell-level note/gain/gate/time-shift fields. */
 function overrideField(page, label) {
   const field = page.locator(".panel-field", { hasText: label });
   return {
     field,
     checkbox: field.locator(".override-control input[type=checkbox]"),
     input: field.locator(".override-control input[type=range]"),
+  };
+}
+
+/** A panel section (Defaults/Envelope/Effects) is a titled group with its
+ * own header toggle button and a dimmable body -- distinct from the
+ * per-cell "override" field above, this is the row/column-level "one
+ * button governs the whole group" pattern. */
+function section(page, title) {
+  const root = page.locator(".panel-section", { hasText: title });
+  return {
+    root,
+    button: root.locator(".panel-header-button"),
+    body: root.locator(".dimmed-section"),
+    field(label) {
+      return root.locator(".panel-field", { hasText: label });
+    },
   };
 }
 
@@ -89,11 +107,7 @@ if (!cellTitle?.startsWith("Cell:")) {
   ok("cell panel title identifies row and column");
 }
 
-// Select the "Kick" row -- exercise an override field end to end: starts
-// unchecked/disabled showing the resolved (built-in) value, checking it
-// enables the control, and the value survives switching selection away
-// and back (this is the state-persistence class of bug fixed earlier --
-// re-verified here against the new panel instead of the old popup).
+// Select the "Kick" row.
 await page
   .locator(".row-master", { hasText: "Kick" })
   .click({ button: "right" });
@@ -104,55 +118,134 @@ if ((await page.locator(".panel-title").textContent()) !== "Row: Kick") {
   ok("row panel title identifies the row");
 }
 
-const noteOverride = overrideField(page, "Default note");
-if (await noteOverride.checkbox.isChecked()) {
-  fail("a fresh row's Default note override should start unchecked");
-}
-if (!(await noteOverride.input.isDisabled())) {
-  fail("Default note's value control should be disabled until overridden");
-}
-if ((await noteOverride.input.inputValue()) !== "60") {
+// Defaults/Envelope are consolidated single-toggle sections now (not
+// per-field checkboxes) -- with the default global precedence ("Row
+// wins"), the row's own Defaults/Envelope buttons should be disabled:
+// row already wins whenever both set a value, so an explicit override
+// here can't change anything.
+const rowDefaults = section(page, "Defaults");
+const rowEnvelope = section(page, "Envelope");
+if (!(await rowDefaults.button.isDisabled())) {
   fail(
-    `Default note should preview the built-in fallback (60) when not overridden, got ${await noteOverride.input.inputValue()}`,
+    "row Defaults button should be disabled while row already has precedence",
   );
+}
+if (!(await rowEnvelope.button.isDisabled())) {
+  fail(
+    "row Envelope button should be disabled while row already has precedence",
+  );
+}
+if (
+  !(await rowDefaults.body.evaluate((el) => el.classList.contains("dimmed")))
+) {
+  fail("row Defaults section should be dimmed while its override is off");
 } else {
-  ok("override field starts unchecked, disabled, showing the resolved value");
+  ok(
+    "row Defaults/Envelope buttons disabled and dimmed (row already has precedence)",
+  );
 }
 
-await noteOverride.checkbox.click();
+// Column doesn't have precedence by default, so its Defaults/Envelope
+// buttons should be enabled -- exercise the full toggle-on, set-value,
+// persist-across-reselection path there instead.
+await page.locator(".column-master").first().click({ button: "right" });
 await page.waitForTimeout(50);
-if (await noteOverride.input.isDisabled()) {
-  fail("Default note's value control should enable immediately on check");
-} else {
-  ok("checking an override enables its value control immediately");
+const columnDefaults = section(page, "Defaults");
+const columnEnvelope = section(page, "Envelope");
+if (await columnDefaults.button.isDisabled()) {
+  fail(
+    "column Defaults button should be enabled by default (row has precedence, not column)",
+  );
 }
-await noteOverride.input.evaluate((el) => {
-  el.value = "84";
+await columnDefaults.button.click();
+await page.waitForTimeout(50);
+if (
+  !(await columnDefaults.button.evaluate((el) =>
+    el.classList.contains("active"),
+  ))
+) {
+  fail("column Defaults button did not activate");
+}
+const columnNoteInput = columnDefaults
+  .field("Default note")
+  .locator("input[type=number]");
+await columnNoteInput.fill("72");
+await columnNoteInput.dispatchEvent("input");
+await page.waitForTimeout(50);
+
+await columnEnvelope.button.click();
+await page.waitForTimeout(50);
+const columnAttackInput = columnEnvelope
+  .field("Attack")
+  .locator("input[type=range]");
+await columnAttackInput.evaluate((el) => {
+  el.value = "50";
   el.dispatchEvent(new Event("input", { bubbles: true }));
 });
 await page.waitForTimeout(50);
 
-await page
-  .locator(".row-master", { hasText: "Synth" })
-  .click({ button: "right" });
+// Reselect away and back to force a render from live model state.
+await page.locator(".column-master").nth(1).click({ button: "right" });
 await page.waitForTimeout(50);
+await page.locator(".column-master").first().click({ button: "right" });
+await page.waitForTimeout(50);
+const columnDefaultsAfter = section(page, "Defaults");
+const columnEnvelopeAfter = section(page, "Envelope");
+if (
+  !(await columnDefaultsAfter.button.evaluate((el) =>
+    el.classList.contains("active"),
+  ))
+) {
+  fail(
+    "column Defaults override did not survive switching selection away and back",
+  );
+}
+const columnNoteAfter = columnDefaultsAfter
+  .field("Default note")
+  .locator("input[type=number]");
+if ((await columnNoteAfter.inputValue()) !== "72") {
+  fail(
+    `column Default note did not persist: expected 72, got ${await columnNoteAfter.inputValue()}`,
+  );
+}
+const columnAttackAfter = columnEnvelopeAfter
+  .field("Attack")
+  .locator("input[type=range]");
+if ((await columnAttackAfter.inputValue()) !== "50") {
+  fail(
+    `column Attack did not persist: expected 50, got ${await columnAttackAfter.inputValue()}`,
+  );
+} else {
+  ok(
+    "Defaults/Envelope section values and active state persist across reselection",
+  );
+}
+
+// Flip global precedence: the row's buttons should enable (row is now the
+// losing side) and the column's should disable (column now wins).
+await page.selectOption("#precedence-select", "column");
 await page
   .locator(".row-master", { hasText: "Kick" })
   .click({ button: "right" });
 await page.waitForTimeout(50);
-const noteOverrideAgain = overrideField(page, "Default note");
-if (!(await noteOverrideAgain.checkbox.isChecked())) {
-  fail(
-    "Default note override did not survive switching selection away and back",
-  );
+if (await section(page, "Defaults").button.isDisabled()) {
+  fail("row Defaults button should enable once column has precedence instead");
 }
-if ((await noteOverrideAgain.input.inputValue()) !== "84") {
-  fail(
-    `Default note value did not persist: expected 84, got ${await noteOverrideAgain.input.inputValue()}`,
-  );
+await page.locator(".column-master").first().click({ button: "right" });
+await page.waitForTimeout(50);
+if (!(await section(page, "Defaults").button.isDisabled())) {
+  fail("column Defaults button should disable once column has precedence");
 } else {
-  ok("override value and checked state persist across reselection");
+  ok(
+    "Defaults/Envelope disabled state follows the global precedence setting live",
+  );
 }
+await page.selectOption("#precedence-select", "row"); // restore
+
+await page
+  .locator(".row-master", { hasText: "Kick" })
+  .click({ button: "right" });
+await page.waitForTimeout(50);
 
 // Rename via the panel; the grid label updates without needing to
 // reselect anything.
@@ -220,32 +313,68 @@ if ((await filterOverrideAfter.input.inputValue()) !== "3500") {
   ok("effect toggle survives a value drag with no render in between");
 }
 
-// Cell-level effects override: a header button next to the panel title
-// (not a field in the list), with the effects controls always visible
-// and interactive -- just visually dimmed -- while the override is off.
+// Regression: enabling Delay used to silence the row entirely, even the
+// dry signal -- effectsChain.ts forced every effect fully wet, and a
+// DelayNode emits nothing until its delay time has elapsed, so a short
+// percussive hit never got heard at all. This can't assert on audio
+// samples from here, but it does confirm the row keeps firing (playhead
+// still advances) and nothing throws with delay active.
+const delayOverride = overrideField(page, "Delay");
+await delayOverride.checkbox.click();
+await page.waitForTimeout(50);
+await page.click("#play-button");
+await page.waitForTimeout(600);
+const playheadWithDelay = await page.evaluate(
+  () => document.querySelectorAll(".cell.playhead").length,
+);
+await page.click("#stop-button");
+if (playheadWithDelay === 0) {
+  fail("playhead stopped advancing with Delay enabled");
+} else if (errors.length > 0) {
+  fail(`errors after enabling Delay:\n${errors.join("\n")}`);
+} else {
+  ok("enabling Delay doesn't break playback or throw");
+}
+
+// Cell panel: an Envelope section (every source type) plus, for sample
+// rows only, an Effects section -- each with its own header toggle
+// button, effects controls always visible and interactive (just visually
+// dimmed) while its override is off.
 await firstCell.click({ button: "right" });
 await page.waitForTimeout(50);
-const headerButton = page.locator(".panel-header-button");
-if ((await headerButton.count()) !== 1) {
-  fail("expected a header override button on a sample row's cell panel");
+const cellSectionTitles = await page
+  .locator(".panel-section-title")
+  .allTextContents();
+if (!cellSectionTitles.includes("Envelope")) {
+  fail("cell panel should have an Envelope section");
 }
-if (await headerButton.evaluate((el) => el.classList.contains("active"))) {
-  fail("cell override button should start inactive");
+if (!cellSectionTitles.includes("Effects")) {
+  fail("a sample row's cell panel should have an Effects section");
+} else {
+  ok("cell panel has Envelope and Effects sections");
 }
-const dimmedSection = page.locator(".dimmed-section");
-if (!(await dimmedSection.evaluate((el) => el.classList.contains("dimmed")))) {
-  fail("cell effects section should start dimmed (override off)");
+
+const cellEffects = section(page, "Effects");
+if (
+  await cellEffects.button.evaluate((el) => el.classList.contains("active"))
+) {
+  fail("cell Effects override button should start inactive");
 }
-const cellFilterCheckbox = dimmedSection
-  .locator(".panel-field", { hasText: "Filter" })
+if (
+  !(await cellEffects.body.evaluate((el) => el.classList.contains("dimmed")))
+) {
+  fail("cell Effects section should start dimmed (override off)");
+}
+const cellFilterCheckbox = cellEffects
+  .field("Filter")
   .locator("input[type=checkbox]");
-const cellFilterInput = dimmedSection
-  .locator(".panel-field", { hasText: "Filter" })
+const cellFilterInput = cellEffects
+  .field("Filter")
   .locator("input[type=range]");
 if (await cellFilterInput.isDisabled()) {
   fail("dimmed cell effects controls should stay interactive, not disabled");
 } else {
-  ok("cell effects section starts dimmed but interactive");
+  ok("cell Effects section starts dimmed but interactive");
 }
 await cellFilterCheckbox.click();
 await page.waitForTimeout(50);
@@ -254,29 +383,29 @@ await cellFilterInput.evaluate((el) => {
   el.dispatchEvent(new Event("input", { bubbles: true }));
 });
 await page.waitForTimeout(50);
-await headerButton.click();
+await cellEffects.button.click();
 await page.waitForTimeout(50);
+
+const cellEffectsAfter = section(page, "Effects");
 if (
-  !(await page
-    .locator(".panel-header-button")
-    .evaluate((el) => el.classList.contains("active")))
+  !(await cellEffectsAfter.button.evaluate((el) =>
+    el.classList.contains("active"),
+  ))
 ) {
-  fail("cell override button did not activate");
+  fail("cell Effects override button did not activate");
 }
 if (
-  await page
-    .locator(".dimmed-section")
-    .evaluate((el) => el.classList.contains("dimmed"))
+  await cellEffectsAfter.body.evaluate((el) => el.classList.contains("dimmed"))
 ) {
   fail(
-    "cell effects section should no longer be dimmed once override is active",
+    "cell Effects section should no longer be dimmed once override is active",
   );
 }
-const cellFilterCheckboxAfter = page
-  .locator(".dimmed-section .panel-field", { hasText: "Filter" })
+const cellFilterCheckboxAfter = cellEffectsAfter
+  .field("Filter")
   .locator("input[type=checkbox]");
-const cellFilterInputAfter = page
-  .locator(".dimmed-section .panel-field", { hasText: "Filter" })
+const cellFilterInputAfter = cellEffectsAfter
+  .field("Filter")
   .locator("input[type=range]");
 if (!(await cellFilterCheckboxAfter.isChecked())) {
   fail(
@@ -296,6 +425,22 @@ if (!(await firstCell.evaluate((el) => el.classList.contains("overridden")))) {
   );
 } else {
   ok("cell shows overridden indicator once its effects override is active");
+}
+
+// Cell Envelope: same consolidated-toggle pattern, no precedence-disable
+// (a cell always wins unconditionally, so there's no "moot" case).
+const cellEnvelope = section(page, "Envelope");
+if (await cellEnvelope.button.isDisabled()) {
+  fail("cell Envelope button should never be precedence-disabled");
+}
+await cellEnvelope.button.click();
+await page.waitForTimeout(50);
+if (
+  !(await cellEnvelope.button.evaluate((el) => el.classList.contains("active")))
+) {
+  fail("cell Envelope override button did not activate");
+} else {
+  ok("cell Envelope override toggles on with no precedence-disable");
 }
 
 // Select a column -- override fields here too.

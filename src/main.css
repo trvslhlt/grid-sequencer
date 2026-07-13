@@ -37,6 +37,15 @@ button:hover {
   background: #3a3e47;
 }
 
+button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+button:disabled:hover {
+  background: #2a2d34;
+}
+
 select,
 input[type="text"],
 input[type="number"] {
@@ -193,10 +202,27 @@ input:disabled {
   gap: 0.5rem;
 }
 
-.dimmed-section {
+.panel-section {
   margin-top: 0.6rem;
   padding-top: 0.6rem;
   border-top: 1px solid #2a2d34;
+}
+
+.panel-section-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.panel-section-title {
+  font-weight: 600;
+  font-size: 0.8rem;
+  color: #9aa0ac;
+}
+
+.dimmed-section {
   transition: opacity 0.15s;
 }
 

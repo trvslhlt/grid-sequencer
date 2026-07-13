@@ -21,8 +21,16 @@ function instantiateEffect(
       return fx;
     }
     case "delay": {
+      // Not wet:1 like the others: createDryWet zeroes the dry path
+      // entirely at wet 1 (dryGain.gain.value = 1 - wet), and a DelayNode
+      // emits nothing until its own delay time has elapsed -- for a short
+      // or percussive note (shorter than the delay time), that's total
+      // silence until an echo that may never arrive, not just "no dry
+      // signal." Delay is the one effect here where full-wet is actually
+      // broken, not just a stylistic choice; a fixed default blend keeps
+      // the dry hit always audible with the echo mixed underneath.
       const fx = new DelayEffect(audioContext);
-      fx.setParams({ wet: 1, ...spec.params });
+      fx.setParams({ wet: 0.35, ...spec.params });
       return fx;
     }
     case "distortion": {

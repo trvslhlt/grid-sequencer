@@ -3,7 +3,6 @@ import type { Send } from "bruit-kit/audio";
 import { createStepClock } from "bruit-kit/midi";
 import type { StepClock } from "bruit-kit/midi";
 import {
-  type AdsrParams,
   semitoneRatio,
   triggerAttack,
   triggerRelease,
@@ -12,6 +11,7 @@ import {
   type CellConfig,
   type ColumnConfig,
   type EffectSpec,
+  type EnvelopeParams,
   type Precedence,
   type ResolvedCellConfig,
   type RowConfig,
@@ -30,21 +30,37 @@ import {
 import { triggerModeGate, triggerModeSourceParams } from "./triggerModes";
 
 /** Exported so the UI can show the same fallback values a field resolves
- * to when nothing overrides it -- see fields.ts's "override" kind. */
+ * to when nothing overrides it -- see fields.ts's "override" kind. The
+ * envelope is deliberately not a musical ADSR shape: a short attack and
+ * release with no decay stage and full sustain is just enough to avoid
+ * clicks at voice start/end, not a stylistic choice a preset would make. */
 export const BUILT_INS = {
   note: 60,
   gain: 0.8,
   gate: 1.0,
   timeShiftSeconds: 0,
+  envelope: {
+    attackMs: 5,
+    decayMs: 0,
+    sustainLevel: 1,
+    releaseMs: 10,
+  } satisfies EnvelopeParams,
 };
+
+function createEnvelope(): EnvelopeParams {
+  return { ...BUILT_INS.envelope };
+}
 
 function createColumnConfig(): ColumnConfig {
   return {
     enabled: true,
-    defaultNote: undefined,
-    defaultGain: undefined,
-    defaultGate: undefined,
-    defaultTimeShiftSeconds: undefined,
+    defaultsOverride: false,
+    defaultNote: BUILT_INS.note,
+    defaultGain: BUILT_INS.gain,
+    defaultGate: BUILT_INS.gate,
+    defaultTimeShiftSeconds: BUILT_INS.timeShiftSeconds,
+    envelopeOverride: false,
+    envelope: createEnvelope(),
   };
 }
 
@@ -55,6 +71,8 @@ function createCellConfig(): CellConfig {
     gain: undefined,
     gate: undefined,
     timeShiftSeconds: undefined,
+    envelopeOverride: false,
+    envelope: createEnvelope(),
     effects: [],
     effectsOverride: false,
   };
@@ -66,13 +84,6 @@ function createCellConfig(): CellConfig {
 function gainToVelocity(gain: number): number {
   return Math.max(0, Math.min(127, Math.round(gain * 127)));
 }
-
-const DEFAULT_SAMPLE_ADSR: AdsrParams = {
-  attackMs: 5,
-  decayMs: 0,
-  sustainLevel: 1,
-  releaseMs: 30,
-};
 
 /** RowConfig plus the runtime plumbing (source instance, persistent chain,
  * reverb send, activation state) a row needs but the UI doesn't -- kept as
@@ -230,15 +241,18 @@ export class GridModel {
       enabled: true,
       triggerMode: { kind: "gatedToStep" },
       playbackMode: "direct",
-      defaultNote: undefined,
-      defaultGain: undefined,
-      defaultTimeShiftSeconds: undefined,
+      defaultsOverride: false,
+      defaultNote: BUILT_INS.note,
+      defaultGain: BUILT_INS.gain,
+      defaultTimeShiftSeconds: BUILT_INS.timeShiftSeconds,
+      envelopeOverride: false,
+      envelope: createEnvelope(),
       effects: [],
       reverbSend: 0,
     };
     if (sourceType === "samplePlayer") {
       source.setParams({
-        rootNote: config.defaultNote ?? BUILT_INS.note,
+        rootNote: config.defaultNote,
         ...triggerModeSourceParams(config.triggerMode),
       });
     }
@@ -309,29 +323,50 @@ export class GridModel {
     if (runtime) runtime.config = { ...runtime.config, playbackMode };
   }
 
-  setRowDefaultNote(row: Row, note: number | undefined): void {
+  /** Governs all three defaults (note/gain/time-shift) together -- see
+   * config.ts's RowConfig doc for why a single flag replaced three
+   * independent "is this one set" checks. */
+  setRowDefaultsOverride(row: Row, on: boolean): void {
+    const runtime = this.findRuntime(row);
+    if (runtime) runtime.config = { ...runtime.config, defaultsOverride: on };
+  }
+
+  setRowDefaultNote(row: Row, note: number): void {
     const runtime = this.findRuntime(row);
     if (!runtime) return;
     runtime.config = { ...runtime.config, defaultNote: note };
-    // Keep in sync even when unset (falling back to the built-in) --
-    // direct-mode playback always uses this row's own note (never the
-    // column's), so the player's internal rootNote has to track it
-    // whether or not the row currently overrides it.
+    // Direct-mode playback always uses this row's own note (never the
+    // column's) regardless of defaultsOverride, so the player's internal
+    // rootNote has to track it unconditionally.
     if (runtime.config.sourceType === "samplePlayer") {
-      runtime.source.setParams({ rootNote: note ?? BUILT_INS.note });
+      runtime.source.setParams({ rootNote: note });
     }
   }
 
-  setRowDefaultGain(row: Row, gain: number | undefined): void {
+  setRowDefaultGain(row: Row, gain: number): void {
     const runtime = this.findRuntime(row);
     if (runtime) runtime.config = { ...runtime.config, defaultGain: gain };
   }
 
-  setRowDefaultTimeShift(row: Row, seconds: number | undefined): void {
+  setRowDefaultTimeShift(row: Row, seconds: number): void {
     const runtime = this.findRuntime(row);
     if (runtime) {
       runtime.config = { ...runtime.config, defaultTimeShiftSeconds: seconds };
     }
+  }
+
+  setRowEnvelopeOverride(row: Row, on: boolean): void {
+    const runtime = this.findRuntime(row);
+    if (runtime) runtime.config = { ...runtime.config, envelopeOverride: on };
+  }
+
+  setRowEnvelope(row: Row, patch: Partial<EnvelopeParams>): void {
+    const runtime = this.findRuntime(row);
+    if (!runtime) return;
+    runtime.config = {
+      ...runtime.config,
+      envelope: { ...runtime.config.envelope, ...patch },
+    };
   }
 
   setRowReverbSend(row: Row, level: number): void {
@@ -443,7 +478,7 @@ export class GridModel {
       const note =
         runtime.config.sourceType === "samplePlayer" &&
         runtime.config.playbackMode === "direct"
-          ? (runtime.config.defaultNote ?? BUILT_INS.note)
+          ? runtime.config.defaultNote
           : resolved.note;
 
       if (
@@ -457,8 +492,19 @@ export class GridModel {
           shiftedAtTime,
           gateSeconds,
           resolved.effects,
+          resolved.envelope,
         );
       } else {
+        // Envelope is otherwise a shared, row-wide source param (not a
+        // per-voice one like velocity/gain) -- safe to mutate right before
+        // firing because fireTick owns the entire scheduling loop itself
+        // (unlike bruit-kit's createStepTrack, which this app deliberately
+        // doesn't use for exactly this reason): the mutation and the
+        // noteOn it applies to happen in the same synchronous call, and
+        // triggerAttack/triggerRelease bake the ramp into a scheduled
+        // AudioParam automation at call time, so a *later* tick changing
+        // these params can't retroactively affect a voice already firing.
+        runtime.source.setParams({ ...resolved.envelope });
         const velocity = gainToVelocity(resolved.gain);
         runtime.source.target.noteOn(note, velocity, shiftedAtTime);
         runtime.source.target.noteOff(note, shiftedAtTime + gateSeconds);
@@ -483,6 +529,7 @@ export class GridModel {
     atTime: number,
     gateSeconds: number,
     effects: RowConfig["effects"],
+    envelope: EnvelopeParams,
   ): void {
     const buffer = runtime.sampleBuffer;
     if (!buffer) return;
@@ -490,26 +537,17 @@ export class GridModel {
 
     const source = this.audioContext.createBufferSource();
     source.buffer = buffer;
-    source.playbackRate.value = semitoneRatio(
-      note,
-      runtime.config.defaultNote ?? BUILT_INS.note,
-    );
+    source.playbackRate.value = semitoneRatio(note, runtime.config.defaultNote);
     const gainNode = this.audioContext.createGain();
     gainNode.gain.value = 0;
     source.connect(gainNode).connect(chain.input);
     source.start(atTime);
 
-    triggerAttack(
-      gainNode.gain,
-      this.audioContext,
-      DEFAULT_SAMPLE_ADSR,
-      gain,
-      atTime,
-    );
+    triggerAttack(gainNode.gain, this.audioContext, envelope, gain, atTime);
     const endTime = triggerRelease(
       gainNode.gain,
       this.audioContext,
-      DEFAULT_SAMPLE_ADSR,
+      envelope,
       atTime + gateSeconds,
     );
     source.stop(endTime);

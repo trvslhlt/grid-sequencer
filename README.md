@@ -65,17 +65,20 @@ All three run inside the already-running dev container (`make up` first).
 
 `tests/verify.mjs` is a manual (not CI) Playwright script that drives a
 real headless browser through the golden path: toggling a cell, selecting
-each panel kind (cell/row/column/master) and exercising an override field
-end to end (starts unchecked/disabled showing the resolved value, checking
-it enables the control immediately, the value survives switching selection
-away and back), the effect toggles (including toggling one on and dragging
-its value with no render in between — a stale-closure regression that
-silently reverted the toggle, since fixed), the cell-level effects
-override button and its always-interactive-but-dimmed controls, adding
-one row of each of the 5 source types (GranularSynth exercises its async
-worklet init), the precedence toggle, tempo (BPM/subdivision), resizing
-the step count, and play/stop — asserting zero console errors throughout.
-Run it after touching grid/UI
+each panel kind (cell/row/column/master), exercising a cell-level override
+field end to end (starts unchecked/disabled showing the resolved value,
+checking it enables the control immediately, the value survives switching
+selection away and back) and a row/column-level section (Defaults/
+Envelope, including the section button's disabled state following the
+global precedence setting live), the effect toggles (including toggling
+one on and dragging its value with no render in between — a stale-closure
+regression that silently reverted the toggle, since fixed), the cell-level
+Effects and Envelope sections and their always-interactive-but-dimmed
+controls, enabling Delay specifically (silenced everything including the
+dry signal, since fixed), adding one row of each of the 5 source types
+(GranularSynth exercises its async worklet init), the precedence toggle,
+tempo (BPM/subdivision), resizing the step count, and play/stop —
+asserting zero console errors throughout. Run it after touching grid/UI
 code (requires `make up` first):
 
 ```
@@ -113,18 +116,36 @@ Then open http://localhost:8080.
   the grid so it's never ambiguous what the panel is editing. The panel
   stays up as you work; selecting something else just swaps its contents,
   no popup to reopen.
-- **Overridable fields** (note/gain/gate/time-shift on cells and columns;
-  note/gain/time-shift on rows; filter/distortion/delay everywhere
-  effects apply) are a checkbox plus its value control **together,
-  always** — the value control is just disabled while the checkbox is
-  unchecked, showing the value it'd currently resolve to from its parent
-  (row/column default, or the built-in fallback) as a preview. Checking
-  the box locks that value in as this level's own override. There's no
-  magic "which value means unset" to remember, and nothing conditionally
-  appears or disappears as a side effect of touching something else.
+- **Cell-level overridable fields** (note/gain/gate/time-shift) are a
+  checkbox plus its value control **together, always** — the value
+  control is just disabled while the checkbox is unchecked, showing the
+  value it'd currently resolve to from its parent (row/column default, or
+  the built-in fallback) as a preview. Checking the box locks that value
+  in as this cell's own override. There's no magic "which value means
+  unset" to remember, and nothing conditionally appears or disappears as
+  a side effect of touching something else.
+- **Row/column-level overrides are grouped into sections** — "Defaults"
+  (note/gain/time-shift, plus gate on columns) and "Envelope" (see
+  below), each with a single **Override** button in its own header
+  instead of a checkbox per field: the whole group is always visible and
+  editable, just dimmed while its button is off, so you can dial in a
+  row's or column's values ahead of time and switch them on with one
+  click. A row's/column's Effects section works the same way per effect
+  type (filter/distortion/delay), unchanged from before.
 - **Row/column precedence** dropdown (top bar): when both a row and a
   column set a default for the same field, this picks which one wins for
-  cells that don't override it themselves.
+  cells that don't override it themselves. Whichever side already wins
+  has its Defaults/Envelope **Override** button disabled there — an
+  override on the winning side can't change an outcome it already
+  controls, so only the losing side's button is actually clickable.
+- **Envelope** (every row, column, and cell): attack/decay/sustain/release,
+  same cascade as any other field (cell > row-or-column-by-precedence >
+  built-in). Defaults to a short attack and release with full sustain in
+  between and no decay stage — just enough to avoid clicks at voice
+  start/end, not a musical shape. Applying it per-cell works for every
+  source type, not just sample rows: the grid's own tick loop sets it
+  immediately before each `noteOn`, which bruit-kit's own stepTrack
+  abstraction couldn't do safely (see `gridModel.ts`'s `fireTick`).
 - **Tempo** (top bar): BPM + a subdivision dropdown (1/4, 1/8, 1/16, and
   their triplet variants) drive step length — the toolkit itself works
   purely in seconds, so `60 / bpm / subdivisionsPerBeat` is entirely an
@@ -143,14 +164,13 @@ Then open http://localhost:8080.
   fixed at creation; everything else (trigger mode, defaults, reverb send,
   effect chain, sample loading, per-source-type params like waveform or
   grain density) lives in that row's panel.
-- **Per-cell effect chain override** (sample rows only): an **Override**
-  button next to the panel title, not a field in the list. The
-  filter/distortion/delay controls below it are always visible and always
-  interactive, even while the override is off, so you can dial in a
-  cell's chain ahead of time instead of building it from scratch under
-  time pressure — they just grey out to show they aren't currently in
-  effect. Flipping the button on switches that cell to its own chain
-  (with whatever you'd already set up) instead of inheriting the row's.
+- **Per-cell effect chain override** (sample rows only): a cell panel's
+  own "Effects" section, same **Override**-button-plus-always-interactive
+  pattern as everything else — dial in a cell's chain ahead of time,
+  switch it on with one click instead of building it from scratch under
+  time pressure. Flipping the button on switches that cell to its own
+  chain (with whatever you'd already set up) instead of inheriting the
+  row's.
 
 ## Project layout
 
