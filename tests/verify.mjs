@@ -12,7 +12,9 @@
 // flip row/column precedence, tempo, and step count, patch persistence
 // (save under a name, reload the page for a genuinely fresh context,
 // confirm "demo" loads by default and the saved patch round-trips
-// through the real backend), and play -- all with zero console errors.
+// through the real backend), recording audio out to a real WAV download,
+// and play -- all with zero console errors.
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
@@ -787,6 +789,32 @@ const playheadCount = await page.evaluate(
 );
 if (playheadCount === 0) fail("no playhead cells lit while playing");
 else ok("playhead advances while playing");
+
+// Record audio out: taps limiter.output (the exact node feeding
+// audioContext.destination -- see main.ts) via bruit-kit's Recorder,
+// re-encodes the captured clip as WAV, and triggers a real browser
+// download -- confirm the file that lands is a genuine, non-empty WAV.
+await page.click("#record-button");
+await page.waitForTimeout(50);
+if ((await page.locator("#record-status").textContent()) !== "Recording…") {
+  fail('record button did not show "Recording…" status');
+}
+await page.waitForTimeout(1000);
+const downloadPromise = page.waitForEvent("download");
+await page.click("#record-button");
+const download = await downloadPromise;
+const downloadPath = await download.path();
+const wavBytes = await readFile(downloadPath);
+if (
+  wavBytes.length < 100 ||
+  wavBytes.toString("ascii", 0, 4) !== "RIFF" ||
+  wavBytes.toString("ascii", 8, 12) !== "WAVE"
+) {
+  fail(`recorded download isn't a valid WAV file (${wavBytes.length} bytes)`);
+} else {
+  ok("recording downloads a genuine, non-empty WAV file");
+}
+
 await page.click("#stop-button");
 
 await page.screenshot({

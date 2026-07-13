@@ -74,7 +74,7 @@ input:disabled {
   align-items: center;
 }
 
-.patch-controls #patch-status {
+.status-text {
   color: #9aa0ac;
   font-size: 0.85rem;
 }

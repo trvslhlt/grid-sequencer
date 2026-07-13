@@ -1,5 +1,6 @@
 import "bruit-kit/ui/automationEditor.css";
 import "bruit-kit/ui/waveformRangeView.css";
+import { Recorder } from "bruit-kit/audio";
 import { getSharedLimiter, unlockAudioContext } from "./audioContext";
 import type { Precedence } from "./grid/config";
 import { GridModel, type Row } from "./grid/gridModel";
@@ -15,6 +16,7 @@ import {
 import { generateBlipBuffer } from "./sampleGen";
 import type { Field } from "./ui/fields";
 import { createGridView, effectsFields } from "./ui/gridView";
+import { encodeWav } from "./wavEncoder";
 
 const DEMO_PATCH_NAME = "demo";
 
@@ -38,6 +40,10 @@ const playButtonEl = document.querySelector<HTMLButtonElement>("#play-button")!;
 const stopButtonEl = document.querySelector<HTMLButtonElement>("#stop-button")!;
 const masterButtonEl =
   document.querySelector<HTMLButtonElement>("#master-button")!;
+const recordButtonEl =
+  document.querySelector<HTMLButtonElement>("#record-button")!;
+const recordStatusEl =
+  document.querySelector<HTMLSpanElement>("#record-status")!;
 const bpmEl = document.querySelector<HTMLInputElement>("#bpm")!;
 const subdivisionEl =
   document.querySelector<HTMLSelectElement>("#subdivision")!;
@@ -85,6 +91,11 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
   appEl.classList.remove("hidden");
 
   const limiter = getSharedLimiter(audioContext);
+  // Taps limiter.output, not masterGain -- the exact same node already
+  // connected to audioContext.destination (see getSharedLimiter), so this
+  // captures precisely what's actually heard, downstream of every row's
+  // effects and the master bus.
+  const recorder = new Recorder(audioContext, limiter.output);
   const model = new GridModel(
     audioContext,
     limiter.input,
@@ -401,6 +412,40 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
   });
 
   masterButtonEl.addEventListener("click", () => view.selectMaster());
+
+  recordButtonEl.addEventListener("click", async () => {
+    if (recorder.isRecording()) {
+      recordButtonEl.disabled = true;
+      recordStatusEl.textContent = "Processing…";
+      const { blob } = await recorder.stop();
+      try {
+        // Re-encoded as WAV (not the raw webm/mp4 MediaRecorder produces)
+        // so the download is universally playable without needing a
+        // browser that understands whatever codec was actually used --
+        // same reasoning as uploadSample's own WAV encode.
+        const buffer = await audioContext.decodeAudioData(
+          await blob.arrayBuffer(),
+        );
+        const wavBlob = encodeWav(buffer);
+        const url = URL.createObjectURL(wavBlob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `grid-sequencer-${Date.now()}.wav`;
+        link.click();
+        URL.revokeObjectURL(url);
+        recordStatusEl.textContent = "";
+      } catch (err) {
+        console.error("Recording couldn't be processed:", err);
+        recordStatusEl.textContent = "Recording failed — try again";
+      }
+      recordButtonEl.textContent = "Record";
+      recordButtonEl.disabled = false;
+    } else {
+      recorder.start();
+      recordButtonEl.textContent = "Stop";
+      recordStatusEl.textContent = "Recording…";
+    }
+  });
 
   function tick(): void {
     view.refreshPlayhead();

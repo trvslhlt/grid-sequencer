@@ -90,9 +90,11 @@ signal, since fixed), adding one row of each of the 5 source types
 tempo (BPM/subdivision), resizing the step count, patch persistence
 (saving under a name with the real overwrite-confirm flow, reloading the
 page for a genuinely fresh context, confirming "demo" loads by default
-and the saved patch round-trips through the actual backend), and
-play/stop — asserting zero console errors throughout (aside from one
-deliberately-triggered, explicitly-filtered 409 from the overwrite check
+and the saved patch round-trips through the actual backend), recording
+audio out (starting/stopping a real capture and confirming the resulting
+download is a genuine, non-empty WAV file), and play/stop — asserting
+zero console errors throughout (aside from one deliberately-triggered,
+explicitly-filtered 409 from the overwrite check
 above — see the script's own comment there). Run it after touching grid/
 UI code (requires `make up` first):
 
@@ -134,6 +136,14 @@ make run-image-backend
   granular) exercising all 5 source types, so it's audible immediately.
   Hit **Play**. See "Patch persistence" below for what "demo" means and
   how to save your own.
+- **Record** (top bar): captures exactly what's actually heard — every
+  row's effects and the master bus, downstream of everything — to a real
+  WAV file. Hit **Record**, play (or it'll just capture silence), hit it
+  again (now labeled **Stop**) to end the take; the browser downloads
+  `grid-sequencer-<timestamp>.wav` immediately, re-encoded from whatever
+  format `MediaRecorder` actually produced so it's universally playable
+  without needing a specific browser/codec. Purely client-side — nothing
+  is uploaded or saved to the backend.
 - **Click a cell** to toggle it on/off. **Click a row label** to mute it.
   **Click a column header** to skip that step for every row.
 - **Right-click a cell, row label, or column header** (or the **Master…**
@@ -266,7 +276,7 @@ round trip instead of silently duplicating) and a permanently-protected
 patch name (see `backend/src/routes/patches.ts`).
 
 A locally-picked sample file (via a row's "Load sample…") uploads to the
-backend as a real WAV (encoded client-side — `src/patchApi.ts`'s
+backend as a real WAV (encoded client-side — `src/wavEncoder.ts`'s
 `encodeWav`, ported from `docker_collab`'s own frontend, since
 `AudioBuffer` has no native way to export one) the moment it loads, not
 just at save time — so it has a durable id to reference in the patch
@@ -277,6 +287,13 @@ stores (`serializePatch`/`applyPatch`); a small `Map<rowId, sampleId>` in
 came from, since that's persistence bookkeeping `RowConfig` itself has no
 reason to know about.
 
+Recording (see "Record" above) reuses the same `encodeWav` but is
+otherwise unrelated to the backend entirely — bruit-kit's own `Recorder`
+class taps `limiter.output` via a permanently-connected
+`MediaStreamAudioDestinationNode`, and the captured clip goes straight to
+a client-side download, the same "no backend route involved" shape
+`docker_collab`'s own app-output-recording feature uses.
+
 ## Project layout
 
 ```
@@ -284,8 +301,9 @@ src/
   main.ts              entry point: audio unlock, GridModel, transport, wiring
   audioContext.ts       audio-unlock + shared limiter (safety net before destination)
   sampleGen.ts           synthesizes a placeholder sample buffer (no binary asset needed)
+  wavEncoder.ts           AudioBuffer -> WAV Blob (shared by sample upload and recording)
   patch.ts               GridModel live state <-> plain-JSON patch (serializePatch/applyPatch)
-  patchApi.ts             fetch wrappers for /api/patches + /api/samples, WAV encoding
+  patchApi.ts             fetch wrappers for /api/patches + /api/samples
   grid/
     config.ts             cascade config types + resolveCellConfig (cell > row/column > built-in)
     sourceFactory.ts       uniform wrapper over bruit-kit's 5 sources/ classes
