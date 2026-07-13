@@ -200,6 +200,13 @@ Then open http://localhost:8080.
   field (shown when its trigger mode is "Explicit duration") is a count of
   grid steps, not seconds, so it scales with tempo instead of needing
   hand re-tuning after a BPM change.
+- **Sample playback range** (sample rows only, once a sample is loaded): a
+  waveform view under "Load sample…" with two drag handles trims which
+  portion of the buffer actually plays — e.g. picking one hit out of a
+  multi-hit recording, or dropping dead air at the start/end. Applies to
+  both the initial playback position and (in looping trigger modes) the
+  loop points, so a trimmed, looping range only cycles within the
+  selected window rather than looping the whole buffer.
 - **Per-cell effect chain override** (sample rows only): a cell panel's
   own "Effects" section, same **Override**-button-plus-always-interactive
   pattern as everything else — dial in a cell's chain ahead of time,

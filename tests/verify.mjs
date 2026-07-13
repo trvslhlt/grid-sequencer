@@ -2,13 +2,15 @@
 // select each panel kind (cell/row/column/master) and exercise its
 // override fields and sections (Defaults/Envelope/Effects, including the
 // precedence-aware disabled-but-shown-active state), drag an Envelope
-// section's breakpoint-curve editor and confirm it persists, the
-// explicitDuration trigger mode's steps-based duration field, all 6
-// effect types (filter/distortion/delay/compressor/tremolo/ringMod) and
-// every one of each one's own params -- not just a single headline param
-// each -- add one of each of the 5 source types (GranularSynth exercises
-// its async worklet init), flip row/column precedence, tempo, and step
-// count, and play -- all with zero console errors.
+// section's breakpoint-curve editor and confirm it persists, a sample
+// row's playback range view (drag handles trim which portion of the
+// buffer plays, also persisted), the explicitDuration trigger mode's
+// steps-based duration field, all 6 effect types (filter/distortion/
+// delay/compressor/tremolo/ringMod) and every one of each one's own
+// params -- not just a single headline param each -- add one of each of
+// the 5 source types (GranularSynth exercises its async worklet init),
+// flip row/column precedence, tempo, and step count, and play -- all with
+// zero console errors.
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
@@ -339,6 +341,61 @@ if ((await page.locator(".row-master", { hasText: "Kicker" }).count()) === 0) {
   fail("renaming a row via the panel did not update its grid label");
 } else {
   ok("row rename updates the grid label immediately");
+}
+
+// Sample playback range: a waveform view with two drag handles trims
+// which portion of the loaded sample actually plays (see bruit-kit's
+// SamplePlayer rangeStart/rangeEnd). Kicker (still selected) already has
+// a generated sample loaded at startup, so the view should already be
+// showing -- nothing to trim before a sample exists.
+const rangeSvg = page.locator(".panel-field-wide .waveform-range-svg");
+if ((await rangeSvg.count()) === 0) {
+  fail("sample row with a loaded buffer should show a playback range view");
+} else {
+  const rangeHandles = rangeSvg.locator(".waveform-range-handle");
+  if ((await rangeHandles.count()) !== 2) {
+    fail(
+      `expected 2 range handles (start/end), found ${await rangeHandles.count()}`,
+    );
+  } else {
+    const svgBox = await rangeSvg.boundingBox();
+    const startHandle = rangeHandles.nth(0);
+    const startBox = await startHandle.boundingBox();
+    await page.mouse.move(
+      startBox.x + startBox.width / 2,
+      startBox.y + startBox.height / 2,
+    );
+    await page.mouse.down();
+    await page.mouse.move(
+      svgBox.x + svgBox.width * 0.3,
+      svgBox.y + svgBox.height / 2,
+      { steps: 5 },
+    );
+    await page.mouse.up();
+    await page.waitForTimeout(50);
+    const draggedX = await startHandle.getAttribute("x1");
+
+    // Reselect away and back to force a render from live model state.
+    await page
+      .locator(".row-master", { hasText: "Synth" })
+      .click({ button: "right" });
+    await page.waitForTimeout(50);
+    await page
+      .locator(".row-master", { hasText: "Kicker" })
+      .click({ button: "right" });
+    await page.waitForTimeout(50);
+    const persistedX = await page
+      .locator(".panel-field-wide .waveform-range-svg .waveform-range-handle")
+      .first()
+      .getAttribute("x1");
+    if (persistedX !== draggedX) {
+      fail(
+        `sample range drag did not persist: expected x1 ${draggedX}, got ${persistedX}`,
+      );
+    } else {
+      ok("sample playback range view shows, drags, and persists");
+    }
+  }
 }
 
 // Trigger mode "explicitDuration" is expressed in grid steps, not seconds

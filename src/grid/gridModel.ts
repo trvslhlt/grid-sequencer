@@ -274,6 +274,7 @@ export class GridModel {
       envelope: createEnvelope(),
       effects: [],
       reverbSend: 0,
+      sampleRange: { start: 0, end: 1 },
     };
     if (sourceType === "samplePlayer") {
       source.setParams({
@@ -327,6 +328,13 @@ export class GridModel {
     if (!runtime || !runtime.source.loadSample) return;
     await runtime.source.loadSample(buffer);
     runtime.sampleBuffer = buffer;
+  }
+
+  /** Not part of the public `Row` shape (see its own doc for why) --
+   * the waveform range view needs the actual decoded buffer to draw
+   * against, which only exists once loadRowSample has resolved. */
+  getRowSampleBuffer(row: Row): AudioBuffer | undefined {
+    return this.findRuntime(row)?.sampleBuffer;
   }
 
   setRowEnabled(row: Row, enabled: boolean): void {
@@ -405,6 +413,18 @@ export class GridModel {
     if (!runtime) return;
     runtime.send.setLevel(level);
     runtime.config = { ...runtime.config, reverbSend: level };
+  }
+
+  setRowSampleRange(row: Row, range: { start: number; end: number }): void {
+    const runtime = this.findRuntime(row);
+    if (!runtime) return;
+    runtime.config = { ...runtime.config, sampleRange: range };
+    if (runtime.config.sourceType === "samplePlayer") {
+      runtime.source.setParams({
+        rangeStart: range.start,
+        rangeEnd: range.end,
+      });
+    }
   }
 
   /** Re-acquires the cache entry for the *new* effects config before
@@ -576,7 +596,22 @@ export class GridModel {
     const gainNode = this.audioContext.createGain();
     gainNode.gain.value = 0;
     source.connect(gainNode).connect(chain.input);
-    source.start(atTime);
+    // Same trimmed-range handling as the row's own shared SamplePlayer
+    // instance (see bruit-kit's SamplePlayer.noteOn) -- this path bypasses
+    // that instance for a fresh per-hit node, so the range has to be
+    // reapplied here rather than inherited from it.
+    const { start: rangeStart, end: rangeEnd } = runtime.config.sampleRange;
+    const offsetStart = Math.min(
+      1,
+      Math.max(0, Math.min(rangeStart, rangeEnd)),
+    );
+    const offsetEnd = Math.min(1, Math.max(0, Math.max(rangeStart, rangeEnd)));
+    const offsetSeconds = offsetStart * buffer.duration;
+    const durationSeconds = Math.max(
+      0,
+      (offsetEnd - offsetStart) * buffer.duration,
+    );
+    source.start(atTime, offsetSeconds, durationSeconds);
 
     // This node is spawned fresh per hit (unlike envelopeGain, which is
     // persistent per row), so the curve's own position-1 point is the

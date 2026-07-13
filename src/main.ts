@@ -1,4 +1,5 @@
 import "bruit-kit/ui/automationEditor.css";
+import "bruit-kit/ui/waveformRangeView.css";
 import { getSharedLimiter, unlockAudioContext } from "./audioContext";
 import type { Precedence } from "./grid/config";
 import { GridModel } from "./grid/gridModel";

@@ -67,6 +67,12 @@ export interface RowConfig {
    * until the row is removed (see effectsChain.ts). */
   effects: EffectSpec[];
   reverbSend: number;
+  /** samplePlayer rows only: 0..1 fractions of the loaded sample's own
+   * duration, trimming which portion actually plays (see bruit-kit's
+   * SamplePlayerParams.rangeStart/rangeEnd, which this maps straight onto).
+   * Ignored by every other source type -- there's nothing to trim before a
+   * sample is loaded, or for a source that doesn't play from a buffer. */
+  sampleRange: { start: number; end: number };
 }
 
 export interface ColumnConfig {

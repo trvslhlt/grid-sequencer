@@ -583,10 +583,27 @@ export function createGridView(
             const arrayBuffer = await file.arrayBuffer();
             const buffer = await audioContext.decodeAudioData(arrayBuffer);
             await model.loadRowSample(row, buffer);
+            // The waveform range view below only appears once a buffer
+            // exists -- nothing to trim a range against before then.
+            render();
           });
           input.click();
         },
       });
+    }
+
+    if (row.config.sourceType === "samplePlayer") {
+      const buffer = model.getRowSampleBuffer(row);
+      if (buffer) {
+        fields.push({
+          key: "sampleRange",
+          label: "Playback range (drag handles to trim)",
+          kind: "waveformRange",
+          buffer,
+          range: row.config.sampleRange,
+          onChange: (range) => model.setRowSampleRange(row, range),
+        });
+      }
     }
 
     fields.push({

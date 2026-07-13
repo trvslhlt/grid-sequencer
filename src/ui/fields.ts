@@ -16,7 +16,12 @@
  * out from under an in-progress drag would abort the drag gesture. Fields
  * that don't need a full rebuild just don't trigger one. */
 
-import { type AutomationPoint, createAutomationEditor } from "bruit-kit/ui";
+import {
+  type AutomationPoint,
+  type WaveformRange,
+  createAutomationEditor,
+  createWaveformRangeView,
+} from "bruit-kit/ui";
 
 export type Field =
   | {
@@ -107,6 +112,17 @@ export type Field =
        * a live-preview one the way range/override fields do. */
       points: AutomationPoint[];
       onChange: (points: AutomationPoint[]) => void;
+    }
+  | {
+      key: string;
+      label: string;
+      kind: "waveformRange";
+      /** The decoded buffer to draw -- the caller only renders this field
+       * once a sample is actually loaded (see gridView.ts's rowPanel),
+       * since there's nothing to trim a range against before then. */
+      buffer: AudioBuffer;
+      range: WaveformRange;
+      onChange: (range: WaveformRange) => void;
     };
 
 function formatValue(value: number, step: number): string {
@@ -208,12 +224,21 @@ function renderField(container: HTMLElement, field: Field): void {
     input.addEventListener("input", () => field.onChange(Number(input.value)));
     row.appendChild(input);
   } else if (field.kind === "automation") {
-    row.classList.add("panel-field-automation");
+    row.classList.add("panel-field-wide");
     const editorEl = document.createElement("div");
     createAutomationEditor(editorEl, field.points, {
       onChange: field.onChange,
     });
     row.appendChild(editorEl);
+  } else if (field.kind === "waveformRange") {
+    row.classList.add("panel-field-wide");
+    const viewEl = document.createElement("div");
+    const view = createWaveformRangeView(viewEl, {
+      initialRange: field.range,
+      onChange: field.onChange,
+    });
+    view.setBuffer(field.buffer);
+    row.appendChild(viewEl);
   } else {
     row.appendChild(renderOverrideControl(field));
   }
