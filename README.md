@@ -264,7 +264,12 @@ make run-image-backend
   plus a **Load from library** button, so building a new row doesn't
   require re-picking a file from disk if something already in the library
   fits. Loading a local file still works exactly as before; the library is
-  additive, not a replacement.
+  additive, not a replacement. `make seed-samples` populates it with 18
+  procedurally synthesized sounds spanning every category (kick, snare,
+  hats, clap, tom, sub/pluck/growl bass, three lead flavors, two pads, and
+  three fx sweeps) — see `scripts/seed-sample-library.mjs`, a standalone
+  Node script (no browser, no npm deps) that synthesizes raw PCM by hand
+  and uploads it the same way a browser-side "Load sample…" pick would.
 - **Per-cell effect chain override** (sample rows only): a cell panel's
   own "Effects" section, same **Override**-button-plus-always-interactive
   pattern as everything else — dial in a cell's chain ahead of time,
@@ -358,6 +363,8 @@ backend/                 Express + TypeScript patch/sample storage (see "Archite
   patches/, samples/        gitignored, created at runtime
 tests/
   verify.mjs              manual Playwright golden-path check (make verify)
+scripts/
+  seed-sample-library.mjs synthesizes + uploads a varied sample library (make seed-samples)
 Dockerfile                dev / bruit-kit-dist / build / runtime stages (frontend)
 backend/Dockerfile         dev / build / runtime stages (backend, independent context)
 docker-compose.yml         app + backend dev containers + the verify service's container

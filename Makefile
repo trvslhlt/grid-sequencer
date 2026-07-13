@@ -1,5 +1,6 @@
 .PHONY: up down restart logs shell lint format typecheck build-image run-image verify \
-	bruit-kit-build backend-logs backend-shell backend-typecheck build-image-backend run-image-backend
+	bruit-kit-build backend-logs backend-shell backend-typecheck build-image-backend run-image-backend \
+	seed-samples
 
 # bruit-kit is bind-mounted read-only into this project's dev container
 # (see docker-compose.yml) rather than copied in, so its own Docker setup
@@ -51,6 +52,13 @@ run-image:
 # first).
 verify:
 	docker compose --profile tools run --rm verify
+
+# Populates the sample library with a varied set of procedurally
+# synthesized sounds (kick/snare/hats/bass/leads/pads/fx) -- run any time
+# against a running backend (`make up` first), safe to run repeatedly
+# (each run just adds another copy, see scripts/seed-sample-library.mjs).
+seed-samples:
+	node scripts/seed-sample-library.mjs
 
 # --- backend equivalents ---
 
