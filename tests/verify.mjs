@@ -1,7 +1,10 @@
 // Manual (non-CI) golden-path browser check: unlock audio, toggle cells,
 // select each panel kind (cell/row/column/master) and exercise its
 // override fields and sections (Defaults/Envelope/Effects, including the
-// precedence-aware disabled state), add one of each of the 5 source types
+// precedence-aware disabled-but-shown-active state), drag an Envelope
+// section's breakpoint-curve editor and confirm it persists, the
+// explicitDuration trigger mode's steps-based duration field, the
+// Compressor effect toggle, add one of each of the 5 source types
 // (GranularSynth exercises its async worklet init), flip row/column
 // precedence, tempo, and step count, and play -- all with zero console
 // errors.
@@ -48,7 +51,34 @@ function section(page, title) {
     field(label) {
       return root.locator(".panel-field", { hasText: label });
     },
+    // Envelope sections render one "automation" field -- a breakpoint-curve
+    // editor (see fields.ts) rather than plain inputs.
+    automationSvg() {
+      return root.locator(".automation-svg");
+    },
   };
+}
+
+/** Drags an automation editor's Nth handle to roughly (fracX, fracY) of the
+ * SVG's own bounding box and returns its resulting cy attribute, so a
+ * caller can assert the same position survives a reselect. */
+async function dragAutomationHandle(page, svg, index, fracX, fracY) {
+  const svgBox = await svg.boundingBox();
+  const handle = svg.locator(".automation-handle").nth(index);
+  const handleBox = await handle.boundingBox();
+  await page.mouse.move(
+    handleBox.x + handleBox.width / 2,
+    handleBox.y + handleBox.height / 2,
+  );
+  await page.mouse.down();
+  await page.mouse.move(
+    svgBox.x + svgBox.width * fracX,
+    svgBox.y + svgBox.height * fracY,
+    { steps: 5 },
+  );
+  await page.mouse.up();
+  await page.waitForTimeout(50);
+  return handle.getAttribute("cy");
 }
 
 const browser = await chromium.launch();
@@ -122,7 +152,10 @@ if ((await page.locator(".panel-title").textContent()) !== "Row: Kick") {
 // per-field checkboxes) -- with the default global precedence ("Row
 // wins"), the row's own Defaults/Envelope buttons should be disabled:
 // row already wins whenever both set a value, so an explicit override
-// here can't change anything.
+// here can't change anything. They should also show as *active* while
+// disabled, not off -- the winning side always contributes its defaults
+// unconditionally (see resolveCellConfig's doc), so a disabled-but-off
+// button would misrepresent that as "not contributing."
 const rowDefaults = section(page, "Defaults");
 const rowEnvelope = section(page, "Envelope");
 if (!(await rowDefaults.button.isDisabled())) {
@@ -136,12 +169,26 @@ if (!(await rowEnvelope.button.isDisabled())) {
   );
 }
 if (
-  !(await rowDefaults.body.evaluate((el) => el.classList.contains("dimmed")))
+  !(await rowDefaults.button.evaluate((el) => el.classList.contains("active")))
 ) {
-  fail("row Defaults section should be dimmed while its override is off");
+  fail(
+    "row Defaults button should show active while precedence-disabled, not off",
+  );
+}
+if (
+  !(await rowEnvelope.button.evaluate((el) => el.classList.contains("active")))
+) {
+  fail(
+    "row Envelope button should show active while precedence-disabled, not off",
+  );
+}
+if (await rowDefaults.body.evaluate((el) => el.classList.contains("dimmed"))) {
+  fail(
+    "row Defaults section should not be dimmed while precedence-active (even though disabled)",
+  );
 } else {
   ok(
-    "row Defaults/Envelope buttons disabled and dimmed (row already has precedence)",
+    "row Defaults/Envelope buttons disabled but shown active (row already has precedence)",
   );
 }
 
@@ -175,14 +222,22 @@ await page.waitForTimeout(50);
 
 await columnEnvelope.button.click();
 await page.waitForTimeout(50);
-const columnAttackInput = columnEnvelope
-  .field("Attack")
-  .locator("input[type=range]");
-await columnAttackInput.evaluate((el) => {
-  el.value = "50";
-  el.dispatchEvent(new Event("input", { bubbles: true }));
-});
-await page.waitForTimeout(50);
+const columnHandleCount = await columnEnvelope
+  .automationSvg()
+  .locator(".automation-handle")
+  .count();
+if (columnHandleCount !== 4) {
+  fail(
+    `column Envelope should start with 4 breakpoints (BUILT_INS default), found ${columnHandleCount}`,
+  );
+}
+const columnAttackCyBefore = await dragAutomationHandle(
+  page,
+  columnEnvelope.automationSvg(),
+  1,
+  0.3,
+  0.2,
+);
 
 // Reselect away and back to force a render from live model state.
 await page.locator(".column-master").nth(1).click({ button: "right" });
@@ -208,12 +263,14 @@ if ((await columnNoteAfter.inputValue()) !== "72") {
     `column Default note did not persist: expected 72, got ${await columnNoteAfter.inputValue()}`,
   );
 }
-const columnAttackAfter = columnEnvelopeAfter
-  .field("Attack")
-  .locator("input[type=range]");
-if ((await columnAttackAfter.inputValue()) !== "50") {
+const columnAttackCyAfter = await columnEnvelopeAfter
+  .automationSvg()
+  .locator(".automation-handle")
+  .nth(1)
+  .getAttribute("cy");
+if (columnAttackCyAfter !== columnAttackCyBefore) {
   fail(
-    `column Attack did not persist: expected 50, got ${await columnAttackAfter.inputValue()}`,
+    `column Envelope breakpoint drag did not persist: expected cy ${columnAttackCyBefore}, got ${columnAttackCyAfter}`,
   );
 } else {
   ok(
@@ -261,11 +318,31 @@ if ((await page.locator(".row-master", { hasText: "Kicker" }).count()) === 0) {
   ok("row rename updates the grid label immediately");
 }
 
-// Row menu should show all three effect toggles, each already paired with
+// Trigger mode "explicitDuration" is expressed in grid steps, not seconds
+// -- scales with tempo instead of needing hand re-tuning.
+const triggerModeSelect = page
+  .locator(".panel-field", { hasText: "Trigger mode" })
+  .locator("select");
+await triggerModeSelect.selectOption("explicitDuration");
+await page.waitForTimeout(50);
+const durationField = page.locator(".panel-field", {
+  hasText: "Duration (steps)",
+});
+if ((await durationField.count()) === 0) {
+  fail(
+    'trigger mode "explicitDuration" should show a "Duration (steps)" field',
+  );
+} else {
+  ok("explicitDuration trigger mode exposes duration in steps, not seconds");
+}
+await triggerModeSelect.selectOption("gatedToStep");
+await page.waitForTimeout(50);
+
+// Row menu should show all four effect toggles, each already paired with
 // its (disabled-until-checked) param control -- nothing conditionally
 // appears/disappears as a side effect of *other* fields any more.
 const menuText = await page.locator(".config-panel").innerText();
-for (const label of ["Filter", "Distortion", "Delay"]) {
+for (const label of ["Filter", "Distortion", "Delay", "Compressor"]) {
   if (!menuText.includes(label))
     fail(`row panel missing "${label}" effect toggle`);
 }

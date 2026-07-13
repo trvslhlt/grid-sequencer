@@ -1,12 +1,8 @@
-import { ReverbEffect, createSend } from "bruit-kit/audio";
+import { ReverbEffect, createSend, scheduleAutomation } from "bruit-kit/audio";
 import type { Send } from "bruit-kit/audio";
 import { createStepClock } from "bruit-kit/midi";
 import type { StepClock } from "bruit-kit/midi";
-import {
-  semitoneRatio,
-  triggerAttack,
-  triggerRelease,
-} from "bruit-kit/sources";
+import { semitoneRatio } from "bruit-kit/sources";
 import {
   type CellConfig,
   type ColumnConfig,
@@ -31,24 +27,50 @@ import { triggerModeGate, triggerModeSourceParams } from "./triggerModes";
 
 /** Exported so the UI can show the same fallback values a field resolves
  * to when nothing overrides it -- see fields.ts's "override" kind. The
- * envelope is deliberately not a musical ADSR shape: a short attack and
- * release with no decay stage and full sustain is just enough to avoid
- * clicks at voice start/end, not a stylistic choice a preset would make. */
+ * envelope is deliberately not a musical ADSR shape: a quick rise to full
+ * value, a long hold, and a quick drop right at the end is just enough to
+ * avoid clicks at voice start/end, not a stylistic choice a preset would
+ * make -- and it's a starting curve to reshape via the automation editor,
+ * not a fixed set of stages. */
 export const BUILT_INS = {
   note: 60,
   gain: 0.8,
   gate: 1.0,
   timeShiftSeconds: 0,
   envelope: {
-    attackMs: 5,
-    decayMs: 0,
-    sustainLevel: 1,
-    releaseMs: 10,
+    points: [
+      { position: 0, value: 0 },
+      { position: 0.02, value: 1 },
+      { position: 0.9, value: 1 },
+      { position: 1, value: 0 },
+    ],
   } satisfies EnvelopeParams,
 };
 
+/** A fixed, non-user-facing ramp baked into every row's shared source
+ * instance at creation -- not this app's actual note envelope any more
+ * (see the per-row `envelopeGain` node in addRow/fireTick below), just
+ * enough of a floor that a source's own per-voice gain node never steps
+ * straight to full amplitude, which could click on its own before
+ * envelopeGain's shape gets a chance to smooth it. Deliberately not
+ * user-configurable or part of the resolved cascade -- doubling it up
+ * with envelopeGain's own attack/release would reshape whatever curve the
+ * user actually drew. */
+const SOURCE_ENVELOPE_FLOOR = {
+  attackMs: 2,
+  decayMs: 0,
+  sustainLevel: 1,
+  releaseMs: 5,
+};
+
+/** Every noteOn now goes out at full velocity -- gain is applied entirely
+ * by the per-row envelopeGain node's automation curve (see fireTick),
+ * not by scaling the source's own per-voice peak, so there's nothing left
+ * for a MIDI velocity value to usefully carry. */
+const FULL_VELOCITY = 127;
+
 function createEnvelope(): EnvelopeParams {
-  return { ...BUILT_INS.envelope };
+  return { points: BUILT_INS.envelope.points.map((p) => ({ ...p })) };
 }
 
 function createColumnConfig(): ColumnConfig {
@@ -78,13 +100,6 @@ function createCellConfig(): CellConfig {
   };
 }
 
-/** Linear 0-1 -> MIDI velocity (0-127) -- every sources/ class scales its
- * per-voice envelope peak by velocity/127, so this is the whole
- * implementation of "gain" at fire time (see ResolvedCellConfig.gain). */
-function gainToVelocity(gain: number): number {
-  return Math.max(0, Math.min(127, Math.round(gain * 127)));
-}
-
 /** RowConfig plus the runtime plumbing (source instance, persistent chain,
  * reverb send, activation state) a row needs but the UI doesn't -- kept as
  * a class-private shape so callers only ever see the public `Row` fields. */
@@ -92,6 +107,15 @@ interface RowRuntime {
   readonly id: string;
   config: RowConfig;
   readonly source: RowSource;
+  /** Sits between source.output and the effects chain -- the resolved
+   * envelope's breakpoint curve is scheduled onto this node's gain at
+   * every firing tick (see fireTick), not on the source itself, so the
+   * same shaping mechanism works uniformly across all 5 source types
+   * including GranularSynth (whose own per-grain envelope lives inside an
+   * AudioWorkletProcessor, unreachable from here). Persistent per row, not
+   * per voice -- see the envelope docs in README's Known limitations for
+   * what that means for overlapping notes. */
+  readonly envelopeGain: GainNode;
   cells: CellConfig[];
   chain: BuiltEffectsChain;
   send: Send;
@@ -234,6 +258,7 @@ export class GridModel {
   ): Promise<Row> {
     const source = createRowSource(this.audioContext, sourceType);
     if (source.init) await source.init();
+    source.setParams(SOURCE_ENVELOPE_FLOOR);
 
     const config: RowConfig = {
       name,
@@ -257,8 +282,11 @@ export class GridModel {
       });
     }
 
+    const envelopeGain = this.audioContext.createGain();
+    envelopeGain.gain.value = 0;
+    source.output.connect(envelopeGain);
     const chain = this.chainCache.acquire(config.effects);
-    source.output.connect(chain.input);
+    envelopeGain.connect(chain.input);
     const send = createSend(this.audioContext, this.reverb.input, 0);
     chain.output.connect(send.input);
 
@@ -266,6 +294,7 @@ export class GridModel {
       id: crypto.randomUUID(),
       config,
       source,
+      envelopeGain,
       cells: Array.from({ length: this.columnCount }, () => createCellConfig()),
       chain,
       send,
@@ -281,6 +310,7 @@ export class GridModel {
     const runtime = this.findRuntime(row);
     if (!runtime) return;
     runtime.source.output.disconnect();
+    runtime.envelopeGain.disconnect();
     // The chain may still be shared with another row (same effective
     // config), so only sever this row's own edge into it rather than a
     // blanket chain.output.disconnect() -- that would silence the other
@@ -360,13 +390,14 @@ export class GridModel {
     if (runtime) runtime.config = { ...runtime.config, envelopeOverride: on };
   }
 
-  setRowEnvelope(row: Row, patch: Partial<EnvelopeParams>): void {
+  /** Takes the whole points array (not a patch) -- the automation editor's
+   * onChange already hands back a complete curve on every edit, and unlike
+   * the old ADSR fields there's no sensible way to merge just one point
+   * into an existing curve without knowing which one moved. */
+  setRowEnvelope(row: Row, points: EnvelopeParams["points"]): void {
     const runtime = this.findRuntime(row);
     if (!runtime) return;
-    runtime.config = {
-      ...runtime.config,
-      envelope: { ...runtime.config.envelope, ...patch },
-    };
+    runtime.config = { ...runtime.config, envelope: { points } };
   }
 
   setRowReverbSend(row: Row, level: number): void {
@@ -386,8 +417,8 @@ export class GridModel {
     const oldEffects = runtime.config.effects;
     const oldChain = runtime.chain;
     const newChain = this.chainCache.acquire(effects);
-    runtime.source.output.disconnect();
-    runtime.source.output.connect(newChain.input);
+    runtime.envelopeGain.disconnect();
+    runtime.envelopeGain.connect(newChain.input);
     // Sever only the old chain's own edge into this row's send tap -- not
     // send.input.disconnect(), which would sever send.input's *outgoing*
     // edge to the reverb bus instead and silently kill this row's reverb
@@ -413,10 +444,7 @@ export class GridModel {
   resolveCell(row: Row, columnIndex: number): ResolvedCellConfig {
     const runtime = this.findRuntime(row);
     if (!runtime) throw new Error("row not found");
-    const rowDefaultGate = triggerModeGate(
-      runtime.config.triggerMode,
-      this.stepSeconds,
-    );
+    const rowDefaultGate = triggerModeGate(runtime.config.triggerMode);
     return resolveCellConfig(
       runtime.cells[columnIndex],
       runtime.config,
@@ -459,10 +487,7 @@ export class GridModel {
       if (!runtime.active) continue;
 
       const cell = runtime.cells[columnIndex];
-      const rowDefaultGate = triggerModeGate(
-        runtime.config.triggerMode,
-        stepSeconds,
-      );
+      const rowDefaultGate = triggerModeGate(runtime.config.triggerMode);
       const resolved = resolveCellConfig(
         cell,
         runtime.config,
@@ -495,18 +520,28 @@ export class GridModel {
           resolved.envelope,
         );
       } else {
-        // Envelope is otherwise a shared, row-wide source param (not a
-        // per-voice one like velocity/gain) -- safe to mutate right before
-        // firing because fireTick owns the entire scheduling loop itself
-        // (unlike bruit-kit's createStepTrack, which this app deliberately
-        // doesn't use for exactly this reason): the mutation and the
-        // noteOn it applies to happen in the same synchronous call, and
-        // triggerAttack/triggerRelease bake the ramp into a scheduled
-        // AudioParam automation at call time, so a *later* tick changing
-        // these params can't retroactively affect a voice already firing.
-        runtime.source.setParams({ ...resolved.envelope });
-        const velocity = gainToVelocity(resolved.gain);
-        runtime.source.target.noteOn(note, velocity, shiftedAtTime);
+        // The envelope drives envelopeGain -- a persistent, row-wide node
+        // downstream of the source (see RowRuntime's doc), not a per-voice
+        // param -- so scheduling it here, immediately before the noteOn it
+        // shapes, is safe for the same reason mutating a source's own
+        // params used to be: fireTick owns the entire scheduling loop
+        // itself (unlike bruit-kit's createStepTrack, which this app
+        // deliberately doesn't use for exactly this reason), so the
+        // schedule and the noteOn it applies to happen in the same
+        // synchronous call, both anchored at the same future shiftedAtTime
+        // -- a *later* tick scheduling a new curve can't retroactively
+        // affect a voice already firing. Every noteOn goes out at full
+        // velocity since gain is entirely carried by this curve's own
+        // valueRange max, not by scaling the source's per-voice peak.
+        scheduleAutomation(
+          runtime.envelopeGain.gain,
+          resolved.envelope.points,
+          this.audioContext,
+          gateSeconds,
+          { min: 0, max: resolved.gain },
+          shiftedAtTime,
+        );
+        runtime.source.target.noteOn(note, FULL_VELOCITY, shiftedAtTime);
         runtime.source.target.noteOff(note, shiftedAtTime + gateSeconds);
       }
     }
@@ -543,13 +578,19 @@ export class GridModel {
     source.connect(gainNode).connect(chain.input);
     source.start(atTime);
 
-    triggerAttack(gainNode.gain, this.audioContext, envelope, gain, atTime);
-    const endTime = triggerRelease(
+    // This node is spawned fresh per hit (unlike envelopeGain, which is
+    // persistent per row), so the curve's own position-1 point is the
+    // note's real end -- no extra release tail to account for the way
+    // triggerRelease's return value used to.
+    scheduleAutomation(
       gainNode.gain,
+      envelope.points,
       this.audioContext,
-      envelope,
-      atTime + gateSeconds,
+      gateSeconds,
+      { min: 0, max: gain },
+      atTime,
     );
+    const endTime = atTime + gateSeconds;
     source.stop(endTime);
     source.onended = () => {
       source.disconnect();

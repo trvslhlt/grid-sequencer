@@ -1,3 +1,4 @@
+import "bruit-kit/ui/automationEditor.css";
 import { getSharedLimiter, unlockAudioContext } from "./audioContext";
 import type { Precedence } from "./grid/config";
 import { GridModel } from "./grid/gridModel";

@@ -16,6 +16,8 @@
  * out from under an in-progress drag would abort the drag gesture. Fields
  * that don't need a full rebuild just don't trigger one. */
 
+import { type AutomationPoint, createAutomationEditor } from "bruit-kit/ui";
+
 export type Field =
   | {
       key: string;
@@ -87,6 +89,17 @@ export type Field =
       alwaysInteractive?: boolean;
       onToggle: (overridden: boolean) => void;
       onChange: (value: number) => void;
+    }
+  | {
+      key: string;
+      label: string;
+      kind: "automation";
+      /** A breakpoint curve (see bruit-kit's createAutomationEditor) --
+       * the whole array is handed back on every drag/add/remove, not a
+       * single value, so there's no separate "commit" event to split from
+       * a live-preview one the way range/override fields do. */
+      points: AutomationPoint[];
+      onChange: (points: AutomationPoint[]) => void;
     };
 
 function formatValue(value: number, step: number): string {
@@ -185,6 +198,13 @@ function renderField(container: HTMLElement, field: Field): void {
     input.value = String(field.value);
     input.addEventListener("input", () => field.onChange(Number(input.value)));
     row.appendChild(input);
+  } else if (field.kind === "automation") {
+    row.classList.add("panel-field-automation");
+    const editorEl = document.createElement("div");
+    createAutomationEditor(editorEl, field.points, {
+      onChange: field.onChange,
+    });
+    row.appendChild(editorEl);
   } else {
     row.appendChild(renderOverrideControl(field));
   }

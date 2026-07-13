@@ -14,17 +14,26 @@ export interface EffectSpec {
   params: Record<string, number | string>;
 }
 
-/** Same shape as bruit-kit's AdsrParams (sources/envelope.ts), redeclared
- * locally so this file doesn't reach into bruit-kit for one structural
- * type -- gridModel.ts, which already imports AdsrParams to talk to
- * sources/ directly, passes a ResolvedCellConfig.envelope straight through
- * to a source's setParams(), where structural typing makes the two
- * interchangeable with no conversion. */
+export interface EnvelopePoint {
+  /** 0..1 position across the note's own gated duration (not a fixed
+   * seconds value) -- so the same shape stretches or compresses with
+   * gate/tempo instead of needing to be re-tuned by hand. */
+  position: number;
+  /** 0..1, scaled by the resolved gain at fire time. */
+  value: number;
+}
+
+/** Same shape as bruit-kit's AutomationPoint (audio/automation.ts +
+ * ui/automationEditor.ts), redeclared locally so this file doesn't reach
+ * into bruit-kit for one structural type -- gridModel.ts, which already
+ * imports scheduleAutomation to talk to bruit-kit directly, passes a
+ * ResolvedCellConfig.envelope.points straight through, where structural
+ * typing makes the two interchangeable with no conversion. A multi-point
+ * breakpoint curve rather than a fixed ADSR shape -- the first/last points
+ * are permanent anchors at position 0/1 (see createAutomationEditor), so
+ * this always has at least 2 points. */
 export interface EnvelopeParams {
-  attackMs: number;
-  decayMs: number;
-  sustainLevel: number;
-  releaseMs: number;
+  points: EnvelopePoint[];
 }
 
 /** Which of row/column wins when both set a default for the same field —
@@ -131,6 +140,11 @@ function pick(
   return builtIn;
 }
 
+/** Unlike every numeric default, a breakpoint curve can't be usefully
+ * merged field-by-field across cell/row/column -- there's no sensible
+ * meaning to "this point from the cell, that point from the row." So the
+ * whole points array is picked from a single winning level instead of
+ * `pick()`'s per-field cascade, same precedence order otherwise. */
 function pickEnvelope(
   cell: { envelopeOverride: boolean; envelope: EnvelopeParams },
   row: { envelopeOverride: boolean; envelope: EnvelopeParams },
@@ -138,39 +152,18 @@ function pickEnvelope(
   precedence: Precedence,
   builtIn: EnvelopeParams,
 ): EnvelopeParams {
-  const rowEnv = row.envelopeOverride ? row.envelope : undefined;
-  const columnEnv = column.envelopeOverride ? column.envelope : undefined;
-  const cellEnv = cell.envelopeOverride ? cell.envelope : undefined;
-  return {
-    attackMs: pick(
-      cellEnv?.attackMs,
-      rowEnv?.attackMs,
-      columnEnv?.attackMs,
-      precedence,
-      builtIn.attackMs,
-    ),
-    decayMs: pick(
-      cellEnv?.decayMs,
-      rowEnv?.decayMs,
-      columnEnv?.decayMs,
-      precedence,
-      builtIn.decayMs,
-    ),
-    sustainLevel: pick(
-      cellEnv?.sustainLevel,
-      rowEnv?.sustainLevel,
-      columnEnv?.sustainLevel,
-      precedence,
-      builtIn.sustainLevel,
-    ),
-    releaseMs: pick(
-      cellEnv?.releaseMs,
-      rowEnv?.releaseMs,
-      columnEnv?.releaseMs,
-      precedence,
-      builtIn.releaseMs,
-    ),
-  };
+  if (cell.envelopeOverride) return cell.envelope;
+  // Whichever side already has global precedence contributes
+  // unconditionally -- see the matching comment in resolveCellConfig.
+  const rowEnv =
+    row.envelopeOverride || precedence === "row" ? row.envelope : undefined;
+  const columnEnv =
+    column.envelopeOverride || precedence === "column"
+      ? column.envelope
+      : undefined;
+  const primary = precedence === "row" ? rowEnv : columnEnv;
+  const secondary = precedence === "row" ? columnEnv : rowEnv;
+  return primary ?? secondary ?? builtIn;
 }
 
 export function resolveCellConfig(
@@ -185,23 +178,41 @@ export function resolveCellConfig(
    * module reaching for stepSeconds itself. */
   rowDefaultGate: number,
 ): ResolvedCellConfig {
-  const rowDefaultNote = row.defaultsOverride ? row.defaultNote : undefined;
-  const rowDefaultGain = row.defaultsOverride ? row.defaultGain : undefined;
-  const rowDefaultShift = row.defaultsOverride
-    ? row.defaultTimeShiftSeconds
-    : undefined;
-  const columnDefaultNote = column.defaultsOverride
-    ? column.defaultNote
-    : undefined;
-  const columnDefaultGain = column.defaultsOverride
-    ? column.defaultGain
-    : undefined;
-  const columnDefaultGate = column.defaultsOverride
-    ? column.defaultGate
-    : undefined;
-  const columnDefaultShift = column.defaultsOverride
-    ? column.defaultTimeShiftSeconds
-    : undefined;
+  // Whichever side already wins by the global row/column precedence
+  // setting contributes its defaults unconditionally, not just when its
+  // own override flag happens to be on: since it always wins over the
+  // other side whenever both set a value, there's no useful "off" state
+  // for it -- an explicit override is only meaningful for the *losing*
+  // side, which needs one to make its own values matter at all. The UI
+  // reflects this by showing the winning side's Override button as
+  // permanently on (and disabled) rather than possibly appearing "off"
+  // while still secretly winning.
+  const rowHasPrecedence = precedence === "row";
+  const columnHasPrecedence = precedence === "column";
+  const rowDefaultNote =
+    row.defaultsOverride || rowHasPrecedence ? row.defaultNote : undefined;
+  const rowDefaultGain =
+    row.defaultsOverride || rowHasPrecedence ? row.defaultGain : undefined;
+  const rowDefaultShift =
+    row.defaultsOverride || rowHasPrecedence
+      ? row.defaultTimeShiftSeconds
+      : undefined;
+  const columnDefaultNote =
+    column.defaultsOverride || columnHasPrecedence
+      ? column.defaultNote
+      : undefined;
+  const columnDefaultGain =
+    column.defaultsOverride || columnHasPrecedence
+      ? column.defaultGain
+      : undefined;
+  const columnDefaultGate =
+    column.defaultsOverride || columnHasPrecedence
+      ? column.defaultGate
+      : undefined;
+  const columnDefaultShift =
+    column.defaultsOverride || columnHasPrecedence
+      ? column.defaultTimeShiftSeconds
+      : undefined;
 
   return {
     fires: cell.on && row.enabled && column.enabled,

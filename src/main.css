@@ -267,6 +267,13 @@ input:disabled {
   gap: 0.4rem;
 }
 
+/* The automation editor's SVG is wide and needs to sit below its label,
+ * not squeezed beside it like every other field's inline control. */
+.panel-field-automation {
+  flex-direction: column;
+  align-items: stretch;
+}
+
 .field-value {
   font-variant-numeric: tabular-nums;
   color: #9aa0ac;

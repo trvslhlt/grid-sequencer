@@ -7,12 +7,13 @@ import {
 } from "../grid/triggerModes";
 import { type Field, renderFields } from "./fields";
 
-/** filter/distortion/delay are the 3 persistent-chain effect types this UI
- * exposes (see effectsChain.ts's `EffectSpec` for the general shape any
- * project could add more of). An effect is "on" purely by being present
- * in the array -- effectsFields below renders that as a single override
- * field (checkbox + always-visible param), same as every other
- * overridable value in this panel. */
+/** filter/distortion/delay/compressor are the 4 persistent-chain effect
+ * types this UI exposes (see effectsChain.ts's `EffectSpec` for the
+ * general shape any project could add more of -- tremolo/ringMod are
+ * already instantiable there but have no UI toggle yet). An effect is "on"
+ * purely by being present in the array -- effectsFields below renders that
+ * as a single override field (checkbox + always-visible param), same as
+ * every other overridable value in this panel. */
 const EFFECT_TOGGLES: Array<{
   type: EffectType;
   label: string;
@@ -52,6 +53,16 @@ const EFFECT_TOGGLES: Array<{
     max: 1000,
     step: 10,
     default: 180,
+  },
+  {
+    type: "compressor",
+    label: "Compressor",
+    paramKey: "threshold",
+    paramLabel: "Threshold (dB)",
+    min: -60,
+    max: 0,
+    step: 1,
+    default: -24,
   },
 ];
 
@@ -108,37 +119,24 @@ export function effectsFields(
   });
 }
 
-const ENVELOPE_FIELD_SPECS: Array<{
-  key: keyof EnvelopeParams;
-  label: string;
-  min: number;
-  max: number;
-  step: number;
-}> = [
-  { key: "attackMs", label: "Attack (ms)", min: 0, max: 500, step: 1 },
-  { key: "decayMs", label: "Decay (ms)", min: 0, max: 1000, step: 5 },
-  { key: "sustainLevel", label: "Sustain level", min: 0, max: 1, step: 0.01 },
-  { key: "releaseMs", label: "Release (ms)", min: 0, max: 1000, step: 1 },
-];
-
 /** Envelope is always a single consolidated override (like row/column
- * Defaults, unlike note/gain/gate/time-shift's per-field checkboxes) --
- * all 4 ADSR fields are plain always-interactive controls, gated by one
- * section-level toggle the caller supplies via `onChange`'s wiring. */
+ * Defaults, unlike note/gain/gate/time-shift's per-field checkboxes) -- a
+ * single breakpoint-curve editor (see fields.ts's "automation" kind),
+ * always interactive, gated by one section-level toggle the caller
+ * supplies via the section's own `toggle` wiring. */
 function envelopeFields(
   envelope: EnvelopeParams,
-  onChange: (patch: Partial<EnvelopeParams>) => void,
+  onChange: (points: EnvelopeParams["points"]) => void,
 ): Field[] {
-  return ENVELOPE_FIELD_SPECS.map((spec) => ({
-    key: spec.key,
-    label: spec.label,
-    kind: "range",
-    value: envelope[spec.key],
-    min: spec.min,
-    max: spec.max,
-    step: spec.step,
-    onChange: (v) => onChange({ [spec.key]: v }),
-  }));
+  return [
+    {
+      key: "envelope",
+      label: "Shape (drag points, double-click to add/remove)",
+      kind: "automation",
+      points: envelope.points,
+      onChange,
+    },
+  ];
 }
 
 interface PanelSection {
@@ -232,7 +230,7 @@ export function createGridView(
         model.setRowTriggerMode(
           row,
           kind === "explicitDuration"
-            ? { kind, seconds: 0.5, loop: false }
+            ? { kind, steps: 1, loop: false }
             : { kind },
         );
         render();
@@ -241,18 +239,18 @@ export function createGridView(
 
     if (row.config.triggerMode.kind === "explicitDuration") {
       fields.push({
-        key: "explicitSeconds",
-        label: "Duration (s)",
+        key: "explicitSteps",
+        label: "Duration (steps)",
         kind: "number",
-        value: row.config.triggerMode.seconds,
-        min: 0.05,
-        max: 4,
-        step: 0.05,
+        value: row.config.triggerMode.steps,
+        min: 0.1,
+        max: 32,
+        step: 0.1,
         onChange: (v) => {
           if (row.config.triggerMode.kind !== "explicitDuration") return;
           model.setRowTriggerMode(row, {
             ...row.config.triggerMode,
-            seconds: v,
+            steps: v,
           });
           render();
         },
@@ -343,7 +341,7 @@ export function createGridView(
         {
           title: "Defaults",
           toggle: {
-            active: row.config.defaultsOverride,
+            active: row.config.defaultsOverride || defaultsDisabled,
             disabled: defaultsDisabled,
             onClick: () => {
               model.setRowDefaultsOverride(row, !row.config.defaultsOverride);
@@ -386,15 +384,15 @@ export function createGridView(
         {
           title: "Envelope",
           toggle: {
-            active: row.config.envelopeOverride,
+            active: row.config.envelopeOverride || defaultsDisabled,
             disabled: defaultsDisabled,
             onClick: () => {
               model.setRowEnvelopeOverride(row, !row.config.envelopeOverride);
               render();
             },
           },
-          fields: envelopeFields(row.config.envelope, (patch) =>
-            model.setRowEnvelope(row, patch),
+          fields: envelopeFields(row.config.envelope, (points) =>
+            model.setRowEnvelope(row, points),
           ),
         },
         {
@@ -430,7 +428,7 @@ export function createGridView(
         {
           title: "Defaults",
           toggle: {
-            active: column.defaultsOverride,
+            active: column.defaultsOverride || defaultsDisabled,
             disabled: defaultsDisabled,
             onClick: () => {
               model.setColumn(columnIndex, {
@@ -488,7 +486,7 @@ export function createGridView(
         {
           title: "Envelope",
           toggle: {
-            active: column.envelopeOverride,
+            active: column.envelopeOverride || defaultsDisabled,
             disabled: defaultsDisabled,
             onClick: () => {
               model.setColumn(columnIndex, {
@@ -497,10 +495,8 @@ export function createGridView(
               render();
             },
           },
-          fields: envelopeFields(column.envelope, (patch) =>
-            model.setColumn(columnIndex, {
-              envelope: { ...column.envelope, ...patch },
-            }),
+          fields: envelopeFields(column.envelope, (points) =>
+            model.setColumn(columnIndex, { envelope: { points } }),
           ),
         },
       ],
@@ -604,10 +600,8 @@ export function createGridView(
             render();
           },
         },
-        fields: envelopeFields(cell.envelope, (patch) =>
-          model.setCell(row, columnIndex, {
-            envelope: { ...cell.envelope, ...patch },
-          }),
+        fields: envelopeFields(cell.envelope, (points) =>
+          model.setCell(row, columnIndex, { envelope: { points } }),
         ),
       },
     ];

@@ -69,13 +69,16 @@ each panel kind (cell/row/column/master), exercising a cell-level override
 field end to end (starts unchecked/disabled showing the resolved value,
 checking it enables the control immediately, the value survives switching
 selection away and back) and a row/column-level section (Defaults/
-Envelope, including the section button's disabled state following the
-global precedence setting live), the effect toggles (including toggling
-one on and dragging its value with no render in between — a stale-closure
-regression that silently reverted the toggle, since fixed), the cell-level
-Effects and Envelope sections and their always-interactive-but-dimmed
-controls, enabling Delay specifically (silenced everything including the
-dry signal, since fixed), adding one row of each of the 5 source types
+Envelope, including the section button's disabled-but-shown-active state
+following the global precedence setting live), dragging an Envelope
+section's breakpoint-curve editor and confirming the shape persists across
+reselection, the explicitDuration trigger mode's steps-based duration
+field, the effect toggles including Compressor (toggling one on and
+dragging its value with no render in between — a stale-closure regression
+that silently reverted the toggle, since fixed), the cell-level Effects
+and Envelope sections and their always-interactive-but-dimmed controls,
+enabling Delay specifically (silenced everything including the dry
+signal, since fixed), adding one row of each of the 5 source types
 (GranularSynth exercises its async worklet init), the precedence toggle,
 tempo (BPM/subdivision), resizing the step count, and play/stop —
 asserting zero console errors throughout. Run it after touching grid/UI
@@ -131,21 +134,32 @@ Then open http://localhost:8080.
   editable, just dimmed while its button is off, so you can dial in a
   row's or column's values ahead of time and switch them on with one
   click. A row's/column's Effects section works the same way per effect
-  type (filter/distortion/delay), unchanged from before.
+  type (filter/distortion/delay/compressor), unchanged from before.
 - **Row/column precedence** dropdown (top bar): when both a row and a
   column set a default for the same field, this picks which one wins for
   cells that don't override it themselves. Whichever side already wins
-  has its Defaults/Envelope **Override** button disabled there — an
-  override on the winning side can't change an outcome it already
-  controls, so only the losing side's button is actually clickable.
-- **Envelope** (every row, column, and cell): attack/decay/sustain/release,
-  same cascade as any other field (cell > row-or-column-by-precedence >
-  built-in). Defaults to a short attack and release with full sustain in
-  between and no decay stage — just enough to avoid clicks at voice
-  start/end, not a musical shape. Applying it per-cell works for every
-  source type, not just sample rows: the grid's own tick loop sets it
-  immediately before each `noteOn`, which bruit-kit's own stepTrack
-  abstraction couldn't do safely (see `gridModel.ts`'s `fireTick`).
+  has its Defaults/Envelope **Override** button shown **on and disabled**
+  there, not off — it already contributes its values unconditionally
+  (there's no useful "off" state for a side that always wins anyway), so
+  only the losing side's button is actually clickable and meaningful.
+- **Envelope** (every row, column, and cell): a multi-point breakpoint
+  curve, not a fixed ADSR — drag points to reshape it, double-click empty
+  space to add a point, double-click a point to remove it (the first/last
+  points are permanent anchors at the start/end of the note). Same cascade
+  as any other field (cell > row-or-column-by-precedence > built-in), but
+  picked as one whole curve rather than merged field-by-field, since
+  there's no sensible meaning to "this point from the cell, that point
+  from the row." Defaults to a quick rise to full value, a long hold, and
+  a quick drop right at the very end — just enough to avoid clicks at
+  voice start/end, not a musical shape, and a starting point to reshape.
+  Applying it per-cell works for every source type, not just sample rows:
+  a persistent per-row gain node (`envelopeGain`, downstream of the
+  source) carries the curve, scheduled immediately before each `noteOn`
+  via bruit-kit's `scheduleAutomation` — which is also how it stays
+  correct for GranularSynth despite that source's own per-grain envelope
+  living inside an `AudioWorkletProcessor` this app can't reach. See
+  `gridModel.ts`'s `fireTick` and the Known limitations section below for
+  what "persistent per row, not per voice" means for overlapping notes.
 - **Tempo** (top bar): BPM + a subdivision dropdown (1/4, 1/8, 1/16, and
   their triplet variants) drive step length — the toolkit itself works
   purely in seconds, so `60 / bpm / subdivisionsPerBeat` is entirely an
@@ -154,8 +168,8 @@ Then open http://localhost:8080.
   growing keeps existing columns' data and pads with fresh ones; shrinking
   drops the trailing columns.
 - **Master** panel: master gain, an optional master effects chain
-  (filter/distortion/delay, same override fields as a row's), and the
-  limiter's ceiling/release — the limiter itself is always on (a
+  (filter/distortion/delay/compressor, same override fields as a row's),
+  and the limiter's ceiling/release — the limiter itself is always on (a
   brickwall safety net before the audio device, see `audioContext.ts`),
   this just exposes its two params.
 - **Add row**: pick a source type (sample player, oscillator, FM, noise,
@@ -163,7 +177,10 @@ Then open http://localhost:8080.
   take a moment to initialize (loads an `AudioWorklet`). Source type is
   fixed at creation; everything else (trigger mode, defaults, reverb send,
   effect chain, sample loading, per-source-type params like waveform or
-  grain density) lives in that row's panel.
+  grain density) lives in that row's panel. A row's "Duration (steps)"
+  field (shown when its trigger mode is "Explicit duration") is a count of
+  grid steps, not seconds, so it scales with tempo instead of needing
+  hand re-tuning after a BPM change.
 - **Per-cell effect chain override** (sample rows only): a cell panel's
   own "Effects" section, same **Override**-button-plus-always-interactive
   pattern as everything else — dial in a cell's chain ahead of time,
@@ -222,3 +239,12 @@ arbitrarily reroute per note):
   route it into a distinct chain; the other four source types manage
   their ADSR voices internally and don't expose an equivalent "spawn a
   node" primitive.
+- **The envelope curve is a shared per-row node, not per-voice** (except
+  for a sample row's per-cell effects override, which spawns a genuinely
+  fresh node per hit and isn't affected by this). Two overlapping notes
+  fired from the same row interrupt each other's curve — the second
+  note's schedule cancels and replaces whatever was still ramping from the
+  first, the same way a monophonic synth's envelope would. This mirrors a
+  real constraint of `bruit-kit`'s source classes: a row is one shared,
+  polyphonic instance, not a fresh voice reroutable per note (see the
+  first limitation above).
