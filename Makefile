@@ -1,5 +1,5 @@
 .PHONY: up down restart logs shell lint format typecheck build-image run-image verify \
-	bruit-kit-build
+	bruit-kit-build backend-logs backend-shell backend-typecheck build-image-backend run-image-backend
 
 # bruit-kit is bind-mounted read-only into this project's dev container
 # (see docker-compose.yml) rather than copied in, so its own Docker setup
@@ -51,3 +51,22 @@ run-image:
 # first).
 verify:
 	docker compose --profile tools run --rm verify
+
+# --- backend equivalents ---
+
+backend-logs:
+	docker compose logs -f backend
+
+backend-shell:
+	docker compose exec backend sh
+
+backend-typecheck:
+	docker compose exec backend npx tsc --noEmit
+
+# Build the deployable production image (compiled JS + prod deps only).
+build-image-backend:
+	docker build --target runtime -t grid-sequencer-backend ./backend
+
+# Run the built production backend image locally (make build-image-backend first).
+run-image-backend:
+	docker run --rm -p 3002:3002 grid-sequencer-backend

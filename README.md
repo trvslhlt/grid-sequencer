@@ -26,7 +26,9 @@ so you don't need a separate manual step.
 
 ## Develop
 
-Start the dev container (Vite, hot reload) in the background:
+Start the dev containers — the Vite frontend and a small Express backend
+that stores patches/samples (see "Patch persistence" below) — in the
+background:
 
 ```
 make up
@@ -34,7 +36,8 @@ make up
 
 Then open **http://localhost:5175**. (Not 5173: bruit-kit's own dev
 container already reserves that port on the host, and another sibling
-project uses 5174 for the same reason.) The page shows a "Click to enable
+project uses 5174 for the same reason. The backend listens on 3002 for the
+same reason — see `docker-compose.yml`.) The page shows a "Click to enable
 audio" button first (browser autoplay policy), then the grid.
 
 Source files are bind-mounted into the container, so edits on your host
@@ -45,21 +48,25 @@ or the `Dockerfile`.
 Useful commands (see the `Makefile` for the full list):
 
 ```
-make logs      # tail dev server logs
-make restart   # restart the dev container
-make shell     # drop into a shell inside the container
-make down      # stop and remove the container
+make logs      # tail frontend dev server logs
+make restart   # restart the frontend dev container
+make shell     # drop into a shell inside the frontend container
+make down      # stop and remove both containers
+
+make backend-logs      # tail backend logs
+make backend-shell     # drop into a shell inside the backend container
 ```
 
 ## Code quality
 
 ```
-make lint        # biome check
-make format       # biome check --write
-make typecheck     # tsc --noEmit
+make lint        # biome check (frontend)
+make format       # biome check --write (frontend)
+make typecheck     # tsc --noEmit (frontend)
+make backend-typecheck  # tsc --noEmit (backend)
 ```
 
-All three run inside the already-running dev container (`make up` first).
+All run inside the already-running dev containers (`make up` first).
 
 ## Verify
 
@@ -80,9 +87,14 @@ and Envelope sections and their always-interactive-but-dimmed controls,
 enabling Delay specifically (silenced everything including the dry
 signal, since fixed), adding one row of each of the 5 source types
 (GranularSynth exercises its async worklet init), the precedence toggle,
-tempo (BPM/subdivision), resizing the step count, and play/stop —
-asserting zero console errors throughout. Run it after touching grid/UI
-code (requires `make up` first):
+tempo (BPM/subdivision), resizing the step count, patch persistence
+(saving under a name with the real overwrite-confirm flow, reloading the
+page for a genuinely fresh context, confirming "demo" loads by default
+and the saved patch round-trips through the actual backend), and
+play/stop — asserting zero console errors throughout (aside from one
+deliberately-triggered, explicitly-filtered 409 from the overwrite check
+above — see the script's own comment there). Run it after touching grid/
+UI code (requires `make up` first):
 
 ```
 make verify
@@ -104,7 +116,16 @@ make build-image
 make run-image
 ```
 
-Then open http://localhost:8080.
+Then open http://localhost:8080. This builds the frontend only — the
+frontend needs `backend`'s `/api` reachable to actually save/load patches
+(see `vite.config.ts`'s dev-only proxy; there's no equivalent wired up for
+this static image yet). `backend/`'s own image builds and runs
+independently:
+
+```
+make build-image-backend
+make run-image-backend
+```
 
 ## Using the app
 
@@ -214,6 +235,44 @@ Then open http://localhost:8080.
   time pressure. Flipping the button on switches that cell to its own
   chain (with whatever you'd already set up) instead of inheriting the
   row's.
+- **Patch persistence** (bottom controls, under "Add row"): the whole grid
+  — every row/cell/column, master bus, tempo, and any loaded samples —
+  saves to and loads from a real backend (see "Architecture" below), not
+  just browser storage, so it survives a fresh browser entirely. Type a
+  name and hit **Save**; saving under a name that already exists asks to
+  confirm the overwrite first. The grid always loads a **"demo"** patch by
+  default (seeded automatically the first time this app ever runs against
+  a fresh backend) — that name is reserved and can never be overwritten,
+  so there's always a known-good starting point to come back to. Pick any
+  saved patch from the dropdown and hit **Load** to replace the current
+  grid with it (also confirmed first, since it's destructive to whatever
+  you haven't saved).
+
+## Architecture
+
+Two containers: `app` (the Vite frontend, everything described above) and
+`backend` (a small Express + TypeScript service storing patches and
+uploaded samples as plain files — see `backend/src/patchStore.ts` and
+`sampleStore.ts` — no database). The frontend talks to it purely through
+`/api/patches` and `/api/samples`, proxied by Vite in dev
+(`vite.config.ts`) so the browser only ever sees one origin. Modeled
+closely on the sibling project `docker_collab`'s own
+creations-plus-samples backend, with two additions that project's own
+saving doesn't have: name uniqueness (with an overwrite-confirmation
+round trip instead of silently duplicating) and a permanently-protected
+patch name (see `backend/src/routes/patches.ts`).
+
+A locally-picked sample file (via a row's "Load sample…") uploads to the
+backend as a real WAV (encoded client-side — `src/patchApi.ts`'s
+`encodeWav`, ported from `docker_collab`'s own frontend, since
+`AudioBuffer` has no native way to export one) the moment it loads, not
+just at save time — so it has a durable id to reference in the patch
+before you've even decided on a name. `src/patch.ts` converts between
+`GridModel`'s live state and the plain-JSON patch shape the backend
+stores (`serializePatch`/`applyPatch`); a small `Map<rowId, sampleId>` in
+`main.ts` tracks which backend sample each row's currently-loaded buffer
+came from, since that's persistence bookkeeping `RowConfig` itself has no
+reason to know about.
 
 ## Project layout
 
@@ -222,6 +281,8 @@ src/
   main.ts              entry point: audio unlock, GridModel, transport, wiring
   audioContext.ts       audio-unlock + shared limiter (safety net before destination)
   sampleGen.ts           synthesizes a placeholder sample buffer (no binary asset needed)
+  patch.ts               GridModel live state <-> plain-JSON patch (serializePatch/applyPatch)
+  patchApi.ts             fetch wrappers for /api/patches + /api/samples, WAV encoding
   grid/
     config.ts             cascade config types + resolveCellConfig (cell > row/column > built-in)
     sourceFactory.ts       uniform wrapper over bruit-kit's 5 sources/ classes
@@ -235,11 +296,21 @@ public/worklets/
   granular-processor.js  copied from bruit-kit/dist/sources/ -- GranularSynth loads
                           this at runtime via a fetched URL, not a bundler import
                           (see bruit-kit's README)
+backend/                 Express + TypeScript patch/sample storage (see "Architecture" above)
+  src/
+    server.ts              wires the two routers, ensures patches/ + samples/ exist
+    patchStore.ts            one JSON file per patch, keyed by id
+    sampleStore.ts           sidecar JSON + binary file per uploaded sample
+    routes/
+      patches.ts              list/get/save, name uniqueness, "demo" protection
+      samples.ts               list/upload (multer)/stream-by-id
+  patches/, samples/        gitignored, created at runtime
 tests/
   verify.mjs              manual Playwright golden-path check (make verify)
-Dockerfile                dev / bruit-kit-dist / build / runtime stages
-docker-compose.yml         dev container + the verify service's container
-Makefile                    up/down/lint/format/typecheck/build-image/verify/...
+Dockerfile                dev / bruit-kit-dist / build / runtime stages (frontend)
+backend/Dockerfile         dev / build / runtime stages (backend, independent context)
+docker-compose.yml         app + backend dev containers + the verify service's container
+Makefile                    up/down/lint/format/typecheck/build-image/verify/backend-*/...
 ```
 
 Note: `Dockerfile`'s `build`/`runtime` stages need bruit-kit's real files
@@ -274,3 +345,11 @@ arbitrarily reroute per note):
   real constraint of `bruit-kit`'s source classes: a row is one shared,
   polyphonic instance, not a fresh voice reroutable per note (see the
   first limitation above).
+- **No patch delete, and uploaded samples are never deduplicated or
+  cleaned up.** Every "Load sample…" pick uploads a fresh copy to the
+  backend even if the exact same file was already uploaded elsewhere —
+  fine at personal-project scale, not something to rely on for a large
+  sample library (see the roadmap's "sample library" item for where that'd
+  actually get addressed). Deleting a patch isn't wired up anywhere yet
+  either; `backend/patches`/`backend/samples` are plain directories you
+  can always clean up by hand.

@@ -22,6 +22,21 @@ services:
       # `make up` here shells into it first (see this project's Makefile)
       # so dist/ is fresh before this container starts.
       - ../bruit-kit:/workspace/bruit-kit:ro
+    depends_on:
+      - backend
+
+  backend:
+    build:
+      context: ./backend
+      target: dev
+    ports:
+      # Host port 3002, not docker_collab's 3001: avoids a collision if
+      # both projects' dev containers happen to run at once, same
+      # reasoning as this project's own 5175-not-5173 choice above.
+      - "3002:3002"
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
 
   # Manual verification only (not CI) -- drives the running app with a real
   # (headless) browser. Run with `make verify`.

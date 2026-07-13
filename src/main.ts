@@ -2,11 +2,21 @@ import "bruit-kit/ui/automationEditor.css";
 import "bruit-kit/ui/waveformRangeView.css";
 import { getSharedLimiter, unlockAudioContext } from "./audioContext";
 import type { Precedence } from "./grid/config";
-import { GridModel } from "./grid/gridModel";
+import { GridModel, type Row } from "./grid/gridModel";
 import { SOURCE_TYPE_LABELS, type SourceType } from "./grid/sourceFactory";
+import { type TempoState, applyPatch, serializePatch } from "./patch";
+import {
+  SaveConflictError,
+  listPatches,
+  loadPatch,
+  savePatch,
+  uploadSample,
+} from "./patchApi";
 import { generateBlipBuffer } from "./sampleGen";
 import type { Field } from "./ui/fields";
 import { createGridView, effectsFields } from "./ui/gridView";
+
+const DEMO_PATCH_NAME = "demo";
 
 const INITIAL_COLUMN_COUNT = 8;
 
@@ -40,6 +50,14 @@ const newRowTypeEl =
 const newRowNameEl = document.querySelector<HTMLInputElement>("#new-row-name")!;
 const addRowButtonEl =
   document.querySelector<HTMLButtonElement>("#add-row-button")!;
+const patchNameEl = document.querySelector<HTMLInputElement>("#patch-name")!;
+const savePatchButtonEl =
+  document.querySelector<HTMLButtonElement>("#save-patch-button")!;
+const patchSelectEl =
+  document.querySelector<HTMLSelectElement>("#patch-select")!;
+const loadPatchButtonEl =
+  document.querySelector<HTMLButtonElement>("#load-patch-button")!;
+const patchStatusEl = document.querySelector<HTMLSpanElement>("#patch-status")!;
 
 for (const type of Object.keys(SOURCE_TYPE_LABELS) as SourceType[]) {
   const option = document.createElement("option");
@@ -126,13 +144,28 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
     ];
   }
 
-  const view = createGridView(gridEl, model, { buildMasterFields });
+  // Tracks, per row id, the backend sampleId (if any) its currently-loaded
+  // buffer came from -- persistence-specific bookkeeping that doesn't
+  // belong on RowConfig itself (GridModel stays entirely unaware the
+  // backend/patches exist at all), read by serializePatch and populated by
+  // applyPatch and the onSampleLoaded hook below (see patch.ts's doc
+  // comment).
+  const rowSampleIds = new Map<string, string>();
+
+  const view = createGridView(gridEl, model, {
+    buildMasterFields,
+    onSampleLoaded: (row, buffer) => {
+      uploadSample(buffer, row.config.name)
+        .then((meta) => rowSampleIds.set(row.id, meta.id))
+        .catch((err) => console.error("Failed to upload sample:", err));
+    },
+  });
 
   async function addRow(
     sourceType: SourceType,
     name: string,
     on: boolean[] = [],
-  ): Promise<void> {
+  ): Promise<Row> {
     const row = await model.addRow(sourceType, name, model.clock.isPlaying());
     on.forEach((isOn, i) => {
       if (isOn) model.setCell(row, i, { on: true });
@@ -142,30 +175,104 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
       await model.loadRowSample(row, blip);
     }
     view.render();
+    return row;
   }
 
-  // Two starter rows so the grid is audible immediately -- a sample row
-  // (direct/unpitched, drum-hit style) and an oscillator row.
-  await addRow("samplePlayer", "Kick", [
-    true,
-    false,
-    false,
-    false,
-    true,
-    false,
-    false,
-    false,
-  ]);
-  await addRow("oscillatorSynth", "Synth", [
-    false,
-    true,
-    false,
-    true,
-    false,
-    false,
-    true,
-    false,
-  ]);
+  function currentTempoState(): TempoState {
+    return {
+      bpm: Number(bpmEl.value),
+      subdivision: Number(subdivisionEl.value),
+      limiterCeiling,
+      limiterRelease,
+    };
+  }
+
+  function applyTempoState(state: TempoState): void {
+    bpmEl.value = String(state.bpm);
+    subdivisionEl.value = String(state.subdivision);
+    limiterCeiling = state.limiterCeiling;
+    limiterRelease = state.limiterRelease;
+    limiter.setParams({ ceiling: limiterCeiling, release: limiterRelease });
+    model.setStepSeconds(computeStepSeconds());
+  }
+
+  // applyPatch already updates model.precedence/columnCount directly (see
+  // patch.ts) -- this just syncs the two top-bar controls that mirror
+  // them, which nothing else does automatically since they're plain
+  // change-event-driven inputs, not read from the model on every render.
+  function syncTopBarFromModel(): void {
+    precedenceSelectEl.value = model.precedence;
+    columnCountEl.value = String(model.columnCount);
+  }
+
+  async function refreshPatchList(): Promise<void> {
+    const previouslySelected = patchSelectEl.value;
+    const patches = await listPatches();
+    patchSelectEl.innerHTML = "";
+    for (const patch of patches) {
+      const option = document.createElement("option");
+      option.value = patch.id;
+      option.textContent = patch.name;
+      patchSelectEl.appendChild(option);
+    }
+    if (patches.some((p) => p.id === previouslySelected)) {
+      patchSelectEl.value = previouslySelected;
+    }
+  }
+
+  // The "demo" patch is what loads by default -- seeded into the backend
+  // exactly once, the first time this app ever runs against a fresh
+  // backend (every later boot finds it already there and skips straight
+  // to loading it). Seeding builds the same 2-row starter content this
+  // app has always shipped, uploads Kick's synthesized blip as a real
+  // sample (so it round-trips through storage like any other sample would
+  // -- there's no special-cased "regenerate this in JS" path on load), and
+  // saves it under the protected name.
+  async function seedDemoIfMissing(): Promise<void> {
+    if ((await listPatches()).some((p) => p.name === DEMO_PATCH_NAME)) return;
+
+    const kickRow = await addRow("samplePlayer", "Kick", [
+      true,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+    ]);
+    await addRow("oscillatorSynth", "Synth", [
+      false,
+      true,
+      false,
+      true,
+      false,
+      false,
+      true,
+      false,
+    ]);
+
+    const kickBuffer = model.getRowSampleBuffer(kickRow);
+    if (kickBuffer) {
+      const uploaded = await uploadSample(kickBuffer, "Kick blip");
+      rowSampleIds.set(kickRow.id, uploaded.id);
+    }
+
+    const patchData = serializePatch(model, currentTempoState(), rowSampleIds);
+    await savePatch({ ...patchData, name: DEMO_PATCH_NAME });
+  }
+
+  await seedDemoIfMissing();
+  const demoSummary = (await listPatches()).find(
+    (p) => p.name === DEMO_PATCH_NAME,
+  );
+  if (demoSummary) {
+    const demo = await loadPatch(demoSummary.id);
+    applyTempoState(await applyPatch(model, audioContext, demo, rowSampleIds));
+    syncTopBarFromModel();
+    patchNameEl.value = demo.name;
+  }
+  await refreshPatchList();
   view.render();
 
   addRowButtonEl.addEventListener("click", async () => {
@@ -173,6 +280,49 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
     const name = newRowNameEl.value.trim() || SOURCE_TYPE_LABELS[sourceType];
     newRowNameEl.value = "";
     await addRow(sourceType, name);
+  });
+
+  savePatchButtonEl.addEventListener("click", async () => {
+    const name = patchNameEl.value.trim();
+    if (!name) {
+      patchStatusEl.textContent = "Enter a name first";
+      return;
+    }
+    const patchData = serializePatch(model, currentTempoState(), rowSampleIds);
+    try {
+      await savePatch({ ...patchData, name });
+    } catch (err) {
+      if (err instanceof SaveConflictError) {
+        if (err.status === 403) {
+          patchStatusEl.textContent =
+            "Can't overwrite the demo patch — choose a different name";
+          return;
+        }
+        if (!window.confirm(`"${name}" already exists. Overwrite?`)) return;
+        await savePatch({ ...patchData, name }, { overwrite: true });
+      } else {
+        patchStatusEl.textContent = "Save failed — try again";
+        return;
+      }
+    }
+    await refreshPatchList();
+    patchStatusEl.textContent = "Saved";
+  });
+
+  loadPatchButtonEl.addEventListener("click", async () => {
+    const id = patchSelectEl.value;
+    if (!id) return;
+    if (!window.confirm("Loading will replace the current grid. Continue?")) {
+      return;
+    }
+    const patchData = await loadPatch(id);
+    applyTempoState(
+      await applyPatch(model, audioContext, patchData, rowSampleIds),
+    );
+    syncTopBarFromModel();
+    patchNameEl.value = patchData.name;
+    view.render();
+    patchStatusEl.textContent = "Loaded";
   });
 
   playButtonEl.addEventListener("click", () => model.clock.start());

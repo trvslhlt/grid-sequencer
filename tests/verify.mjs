@@ -9,8 +9,10 @@
 // delay/compressor/tremolo/ringMod) and every one of each one's own
 // params -- not just a single headline param each -- add one of each of
 // the 5 source types (GranularSynth exercises its async worklet init),
-// flip row/column precedence, tempo, and step count, and play -- all with
-// zero console errors.
+// flip row/column precedence, tempo, and step count, patch persistence
+// (save under a name, reload the page for a genuinely fresh context,
+// confirm "demo" loads by default and the saved patch round-trips
+// through the real backend), and play -- all with zero console errors.
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
@@ -116,10 +118,17 @@ page.on("console", (msg) => {
 page.on("requestfailed", (req) =>
   errors.push(`requestfailed: ${req.url()} ${req.failure()?.errorText}`),
 );
+// Save-overwrite and load-replace both confirm() -- always accept, an
+// unhandled dialog would otherwise hang the run.
+page.on("dialog", (dialog) => dialog.accept());
 
 await page.goto(baseUrl, { waitUntil: "networkidle" });
 await page.click("#unlock button");
 await page.waitForSelector("#app:not(.hidden)");
+// #app losing .hidden only means the audio-unlock step finished -- demo
+// seeding/loading happens after that, via the backend (see main.ts), so
+// the grid itself isn't populated yet until a row actually appears.
+await page.waitForSelector(".row-master");
 
 const rowCount = await page.locator(".row-master").count();
 if (rowCount !== 2) fail(`expected 2 starter rows, found ${rowCount}`);
@@ -705,6 +714,67 @@ for (const sourceType of ["granularSynth", "noiseGenerator", "fmSynth"]) {
     fail(`adding a ${sourceType} row did not increase row count`);
   } else {
     ok(`added a ${sourceType} row`);
+  }
+}
+
+// Patch persistence: save the current (heavily-mutated -- 5 rows, 12
+// columns, row precedence, 160 BPM) state under a fixed name -- re-runs
+// overwrite it via the same confirm() flow real usage goes through,
+// rather than accumulating a fresh patch on every `make verify`. Reload
+// (a genuinely fresh JS/module context) to prove "demo" loads by default
+// and is unaffected by any of this run's mutations, then explicitly load
+// the saved patch back and confirm the mutated state actually round-
+// tripped through the backend.
+const TEST_PATCH_NAME = "verify-test-patch";
+await page.fill("#patch-name", TEST_PATCH_NAME);
+await page.click("#save-patch-button");
+await page.waitForTimeout(300);
+if ((await page.locator("#patch-status").textContent()) !== "Saved") {
+  fail("saving a patch did not report success");
+} else {
+  ok("patch saves under a name, overwriting a prior same-named run");
+}
+// On every run after the first, this name already exists -- savePatch's
+// own 409-then-overwrite-confirm flow (see main.ts) handles that
+// correctly, but the browser also independently logs the underlying
+// non-2xx fetch response to the console regardless of the app catching
+// it, same as any failed request would. Expected noise from a
+// deliberately-triggered conflict, not a real error.
+const conflictNoiseIndex = errors.findIndex((e) =>
+  e.includes("409 (Conflict)"),
+);
+if (conflictNoiseIndex !== -1) errors.splice(conflictNoiseIndex, 1);
+
+await page.reload({ waitUntil: "networkidle" });
+await page.click("#unlock button");
+await page.waitForSelector("#app:not(.hidden)");
+await page.waitForSelector(".row-master");
+if ((await page.locator("#patch-name").inputValue()) !== "demo") {
+  fail('a fresh reload should load "demo" by default');
+}
+if ((await page.locator(".row-master").count()) !== 2) {
+  fail("demo should be unaffected by this run's mutations (still 2 rows)");
+} else {
+  ok('fresh reload loads "demo" by default, unaffected by prior mutations');
+}
+
+const patchOptionValue = await page
+  .locator("#patch-select option", { hasText: TEST_PATCH_NAME })
+  .getAttribute("value");
+if (!patchOptionValue) {
+  fail(`"${TEST_PATCH_NAME}" missing from the patch list after reload`);
+} else {
+  await page.selectOption("#patch-select", patchOptionValue);
+  await page.click("#load-patch-button");
+  await page.waitForTimeout(500);
+  const loadedRowCount = await page.locator(".row-master").count();
+  const loadedColumnCount = await page.locator(".column-master").count();
+  if (loadedRowCount !== 5 || loadedColumnCount !== 12) {
+    fail(
+      `loaded patch state mismatch: expected 5 rows/12 columns, got ${loadedRowCount} rows/${loadedColumnCount} columns`,
+    );
+  } else {
+    ok("saved patch round-trips through the backend across a fresh reload");
   }
 }
 

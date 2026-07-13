@@ -432,6 +432,12 @@ type Selection =
 
 export interface GridViewOptions {
   buildMasterFields: () => Field[];
+  /** Called right after a row's own "Load sample..." picker finishes
+   * loading a local file -- gridView.ts stays persistence-agnostic (it
+   * doesn't know the backend/patchApi exists at all), so uploading the
+   * buffer to get a durable sampleId for patch-saving is entirely main.ts's
+   * business, wired in through this hook. */
+  onSampleLoaded?: (row: Row, buffer: AudioBuffer) => void;
 }
 
 export interface GridViewHandle {
@@ -583,6 +589,7 @@ export function createGridView(
             const arrayBuffer = await file.arrayBuffer();
             const buffer = await audioContext.decodeAudioData(arrayBuffer);
             await model.loadRowSample(row, buffer);
+            options.onSampleLoaded?.(row, buffer);
             // The waveform range view below only appears once a buffer
             // exists -- nothing to trim a range against before then.
             render();

@@ -67,6 +67,18 @@ input:disabled {
   align-items: center;
 }
 
+.patch-controls {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+  align-items: center;
+}
+
+.patch-controls #patch-status {
+  color: #9aa0ac;
+  font-size: 0.85rem;
+}
+
 .grid-layout {
   display: flex;
   gap: 1.5rem;
