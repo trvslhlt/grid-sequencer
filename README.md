@@ -133,8 +133,27 @@ Then open http://localhost:8080.
   instead of a checkbox per field: the whole group is always visible and
   editable, just dimmed while its button is off, so you can dial in a
   row's or column's values ahead of time and switch them on with one
-  click. A row's/column's Effects section works the same way per effect
-  type (filter/distortion/delay/compressor), unchanged from before.
+  click.
+- **Effects** (row, cell, and master — see below): six persistent-chain
+  types, each with **all** of its own params exposed, not just one
+  headline knob:
+  - **Filter** — type (lowpass/highpass/bandpass/lowshelf/highshelf/
+    peaking/notch/allpass), cutoff, resonance (Q), wet.
+  - **Distortion** — amount, output gain, wet.
+  - **Delay** — time, feedback, wet.
+  - **Compressor** — threshold, ratio, attack, release, wet.
+  - **Tremolo** — rate, depth, LFO shape (sine/square), wet.
+  - **Ring Mod** — carrier frequency, carrier shape (sine/square/
+    sawtooth), wet.
+
+  Each effect type is one checkbox (is it in the chain at all) followed
+  by all its own params as plain, always-interactive fields — configure
+  them before switching the effect on, same "dial in ahead of time"
+  pattern as Defaults/Envelope, not a per-param disabled-until-checked
+  control the way this used to work. `wet` (dry/wet mix) used to be fixed
+  at instantiation time (1 for every type except delay, which defaults to
+  0.35 — see the next bullet) and is now user-adjustable like everything
+  else.
 - **Row/column precedence** dropdown (top bar): when both a row and a
   column set a default for the same field, this picks which one wins for
   cells that don't override it themselves. Whichever side already wins
@@ -167,11 +186,11 @@ Then open http://localhost:8080.
 - **Steps** (top bar): the number of columns, adjustable at any time —
   growing keeps existing columns' data and pads with fresh ones; shrinking
   drops the trailing columns.
-- **Master** panel: master gain, an optional master effects chain
-  (filter/distortion/delay/compressor, same override fields as a row's),
-  and the limiter's ceiling/release — the limiter itself is always on (a
-  brickwall safety net before the audio device, see `audioContext.ts`),
-  this just exposes its two params.
+- **Master** panel: master gain, an optional master effects chain (the
+  same 6 effect types as a row's, see above), and the limiter's ceiling/
+  release — the limiter itself is always on (a brickwall safety net
+  before the audio device, see `audioContext.ts`), this just exposes its
+  two params.
 - **Add row**: pick a source type (sample player, oscillator, FM, noise,
   or granular synth) and a name, then **Add row**. Granular-synth rows
   take a moment to initialize (loads an `AudioWorklet`). Source type is

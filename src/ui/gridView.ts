@@ -7,66 +7,302 @@ import {
 } from "../grid/triggerModes";
 import { type Field, renderFields } from "./fields";
 
-/** filter/distortion/delay/compressor are the 4 persistent-chain effect
- * types this UI exposes (see effectsChain.ts's `EffectSpec` for the
- * general shape any project could add more of -- tremolo/ringMod are
- * already instantiable there but have no UI toggle yet). An effect is "on"
- * purely by being present in the array -- effectsFields below renders that
- * as a single override field (checkbox + always-visible param), same as
- * every other overridable value in this panel. */
-const EFFECT_TOGGLES: Array<{
-  type: EffectType;
+interface EffectRangeParamSpec {
+  key: string;
   label: string;
-  paramKey: string;
-  paramLabel: string;
+  kind: "range";
   min: number;
   max: number;
   step: number;
   default: number;
+  /** `default`/the stored value are in the underlying effect class's own
+   * native unit (e.g. compressor attack/release are seconds, the
+   * DynamicsCompressorNode's own unit) -- `min`/`max`/`step` above are
+   * already authored in whatever unit is actually UI-friendly (e.g.
+   * milliseconds), so only the value itself needs converting: displayed
+   * as `stored * scale`, written back as `display / scale`. Omitted (1)
+   * for every param whose native unit is already UI-friendly. */
+  scale?: number;
+}
+
+interface EffectSelectParamSpec {
+  key: string;
+  label: string;
+  kind: "select";
+  options: string[];
+  default: string;
+}
+
+type EffectParamSpec = EffectRangeParamSpec | EffectSelectParamSpec;
+
+/** Every persistent-chain effect type this UI exposes, and *all* of each
+ * one's params -- not just the single headline param each used to get
+ * (see effectsChain.ts's `instantiateEffect` and bruit-kit's individual
+ * effect classes for the full param lists this mirrors). `wet` (dry/wet
+ * mix) is included for every type: previously fixed at instantiation time
+ * (1 for most, 0.35 for delay -- see the comment on delay's entry below)
+ * and never user-adjustable at all. */
+const EFFECT_TABLE: Array<{
+  type: EffectType;
+  label: string;
+  params: EffectParamSpec[];
 }> = [
   {
     type: "filter",
     label: "Filter",
-    paramKey: "frequency",
-    paramLabel: "Cutoff (Hz)",
-    min: 200,
-    max: 8000,
-    step: 50,
-    default: 8000,
+    params: [
+      {
+        key: "type",
+        label: "Filter type",
+        kind: "select",
+        options: [
+          "lowpass",
+          "highpass",
+          "bandpass",
+          "lowshelf",
+          "highshelf",
+          "peaking",
+          "notch",
+          "allpass",
+        ],
+        default: "lowpass",
+      },
+      {
+        key: "frequency",
+        label: "Cutoff (Hz)",
+        kind: "range",
+        min: 200,
+        max: 8000,
+        step: 50,
+        default: 8000,
+      },
+      {
+        key: "q",
+        label: "Resonance (Q)",
+        kind: "range",
+        min: 0.1,
+        max: 20,
+        step: 0.1,
+        default: 0.7,
+      },
+      {
+        key: "wet",
+        label: "Wet",
+        kind: "range",
+        min: 0,
+        max: 1,
+        step: 0.01,
+        default: 1,
+      },
+    ],
   },
   {
     type: "distortion",
     label: "Distortion",
-    paramKey: "amount",
-    paramLabel: "Amount",
-    min: 0,
-    max: 100,
-    step: 1,
-    default: 20,
+    params: [
+      {
+        key: "amount",
+        label: "Amount",
+        kind: "range",
+        min: 0,
+        max: 100,
+        step: 1,
+        default: 20,
+      },
+      {
+        key: "outputGain",
+        label: "Output gain",
+        kind: "range",
+        min: 0,
+        max: 2,
+        step: 0.05,
+        default: 1,
+      },
+      {
+        key: "wet",
+        label: "Wet",
+        kind: "range",
+        min: 0,
+        max: 1,
+        step: 0.01,
+        default: 1,
+      },
+    ],
   },
   {
     type: "delay",
     label: "Delay",
-    paramKey: "delayMs",
-    paramLabel: "Time (ms)",
-    min: 10,
-    max: 1000,
-    step: 10,
-    default: 180,
+    params: [
+      {
+        key: "delayMs",
+        label: "Time (ms)",
+        kind: "range",
+        min: 10,
+        max: 1000,
+        step: 10,
+        default: 180,
+      },
+      {
+        key: "feedback",
+        label: "Feedback",
+        kind: "range",
+        min: 0,
+        max: 0.95,
+        step: 0.01,
+        default: 0.35,
+      },
+      // Not default 1 like the others -- see effectsChain.ts's
+      // instantiateEffect for why full-wet is actually broken for delay
+      // specifically (a short/percussive note can go fully silent until
+      // an echo that may never arrive).
+      {
+        key: "wet",
+        label: "Wet",
+        kind: "range",
+        min: 0,
+        max: 1,
+        step: 0.01,
+        default: 0.35,
+      },
+    ],
   },
   {
     type: "compressor",
     label: "Compressor",
-    paramKey: "threshold",
-    paramLabel: "Threshold (dB)",
-    min: -60,
-    max: 0,
-    step: 1,
-    default: -24,
+    params: [
+      {
+        key: "threshold",
+        label: "Threshold (dB)",
+        kind: "range",
+        min: -60,
+        max: 0,
+        step: 1,
+        default: -24,
+      },
+      {
+        key: "ratio",
+        label: "Ratio",
+        kind: "range",
+        min: 1,
+        max: 20,
+        step: 0.5,
+        default: 12,
+      },
+      {
+        key: "attack",
+        label: "Attack (ms)",
+        kind: "range",
+        min: 0,
+        max: 200,
+        step: 1,
+        default: 0.003,
+        scale: 1000,
+      },
+      {
+        key: "release",
+        label: "Release (ms)",
+        kind: "range",
+        min: 0,
+        max: 1000,
+        step: 5,
+        default: 0.25,
+        scale: 1000,
+      },
+      {
+        key: "wet",
+        label: "Wet",
+        kind: "range",
+        min: 0,
+        max: 1,
+        step: 0.01,
+        default: 1,
+      },
+    ],
+  },
+  {
+    type: "tremolo",
+    label: "Tremolo",
+    params: [
+      {
+        key: "rate",
+        label: "Rate (Hz)",
+        kind: "range",
+        min: 0.1,
+        max: 20,
+        step: 0.1,
+        default: 5,
+      },
+      {
+        key: "depth",
+        label: "Depth",
+        kind: "range",
+        min: 0,
+        max: 1,
+        step: 0.01,
+        default: 0.5,
+      },
+      {
+        key: "waveform",
+        label: "LFO shape",
+        kind: "select",
+        options: ["sine", "square"],
+        default: "sine",
+      },
+      {
+        key: "wet",
+        label: "Wet",
+        kind: "range",
+        min: 0,
+        max: 1,
+        step: 0.01,
+        default: 1,
+      },
+    ],
+  },
+  {
+    type: "ringMod",
+    label: "Ring Mod",
+    params: [
+      {
+        key: "frequency",
+        label: "Frequency (Hz)",
+        kind: "range",
+        min: 1,
+        max: 2000,
+        step: 1,
+        default: 30,
+      },
+      {
+        key: "waveform",
+        label: "Carrier shape",
+        kind: "select",
+        options: ["sine", "square", "sawtooth"],
+        default: "sine",
+      },
+      {
+        key: "wet",
+        label: "Wet",
+        kind: "range",
+        min: 0,
+        max: 1,
+        step: 0.01,
+        default: 1,
+      },
+    ],
   },
 ];
 
-/** `getEffects` is called fresh inside every handler, not just once up
+/** One checkbox (is this effect type in the chain at all) followed by
+ * *all* of its own params as plain, always-interactive fields -- unlike
+ * the old single-param "override" field, there's no one value to pair
+ * the checkbox with any more, so params just sit in the panel's normal
+ * dimmed-while-off section body (see the callers' `.dimmed-section`
+ * wrapping) rather than each disabling itself individually. That's a
+ * deliberate unification, not a shortcut: cell-level effects already
+ * worked this way (configurable ahead of switching them on), and row/
+ * master-level ones now do too.
+ *
+ * `getEffects` is called fresh inside every handler, not just once up
  * front: none of this panel's continuous controls trigger a rebuild on
  * their own "input" events (see fields.ts's top comment for why), so a
  * checkbox toggle followed by a value drag with no render in between
@@ -75,48 +311,78 @@ const EFFECT_TOGGLES: Array<{
 export function effectsFields(
   getEffects: () => EffectSpec[],
   onUpdate: (next: EffectSpec[]) => void,
-  options: { alwaysInteractive?: boolean } = {},
 ): Field[] {
   const effects = getEffects();
-  return EFFECT_TOGGLES.map((toggle) => {
-    const spec = effects.find((e) => e.type === toggle.type);
-    const value =
-      typeof spec?.params[toggle.paramKey] === "number"
-        ? (spec.params[toggle.paramKey] as number)
-        : toggle.default;
-    return {
-      key: toggle.type,
-      label: `${toggle.label}: ${toggle.paramLabel}`,
-      kind: "override",
-      overridden: spec !== undefined,
-      alwaysInteractive: options.alwaysInteractive,
-      value,
-      min: toggle.min,
-      max: toggle.max,
-      step: toggle.step,
-      onToggle: (on) => {
+  const fields: Field[] = [];
+  for (const effect of EFFECT_TABLE) {
+    const spec = effects.find((e) => e.type === effect.type);
+    fields.push({
+      key: effect.type,
+      label: effect.label,
+      kind: "checkbox",
+      value: spec !== undefined,
+      onChange: (on) => {
         const current = getEffects();
         onUpdate(
           on
             ? [
                 ...current,
-                { type: toggle.type, params: { [toggle.paramKey]: value } },
+                {
+                  type: effect.type,
+                  params: Object.fromEntries(
+                    effect.params.map((p) => [p.key, p.default]),
+                  ),
+                },
               ]
-            : current.filter((e) => e.type !== toggle.type),
+            : current.filter((e) => e.type !== effect.type),
         );
       },
-      onChange: (v) => {
+    });
+    for (const param of effect.params) {
+      const key = `${effect.type}-${param.key}`;
+      const label = `${effect.label}: ${param.label}`;
+      const stored = spec?.params[param.key];
+      const onChange = (v: number | string) => {
         const current = getEffects();
         onUpdate(
           current.map((e) =>
-            e.type === toggle.type
-              ? { ...e, params: { ...e.params, [toggle.paramKey]: v } }
+            e.type === effect.type
+              ? { ...e, params: { ...e.params, [param.key]: v } }
               : e,
           ),
         );
-      },
-    };
-  });
+      };
+      if (param.kind === "select") {
+        fields.push({
+          key,
+          label,
+          kind: "select",
+          value: typeof stored === "string" ? stored : param.default,
+          options: param.options,
+          onChange,
+        });
+      } else {
+        // min/max/step are already authored in display units (e.g.
+        // compressor attack's 0..200 ms) -- only `default`/`stored` are in
+        // the effect class's own native units (seconds), so scale applies
+        // to the value conversion alone, not the range bounds.
+        const scale = param.scale ?? 1;
+        const storedNumber =
+          typeof stored === "number" ? stored : param.default;
+        fields.push({
+          key,
+          label,
+          kind: "range",
+          value: storedNumber * scale,
+          min: param.min,
+          max: param.max,
+          step: param.step,
+          onChange: (v) => onChange(v / scale),
+        });
+      }
+    }
+  }
+  return fields;
 }
 
 /** Envelope is always a single consolidated override (like row/column
@@ -626,7 +892,6 @@ export function createGridView(
         fields: effectsFields(
           () => row.cells[columnIndex].effects,
           (next) => model.setCell(row, columnIndex, { effects: next }),
-          { alwaysInteractive: true },
         ),
       });
     }

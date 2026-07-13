@@ -103,7 +103,7 @@ export function createRowSource(
           label: "Waveform",
           kind: "select",
           options: ["sine", "square", "sawtooth", "triangle"],
-          default: "sawtooth",
+          default: "sine",
         },
         {
           key: "detune",

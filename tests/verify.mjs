@@ -3,11 +3,12 @@
 // override fields and sections (Defaults/Envelope/Effects, including the
 // precedence-aware disabled-but-shown-active state), drag an Envelope
 // section's breakpoint-curve editor and confirm it persists, the
-// explicitDuration trigger mode's steps-based duration field, the
-// Compressor effect toggle, add one of each of the 5 source types
-// (GranularSynth exercises its async worklet init), flip row/column
-// precedence, tempo, and step count, and play -- all with zero console
-// errors.
+// explicitDuration trigger mode's steps-based duration field, all 6
+// effect types (filter/distortion/delay/compressor/tremolo/ringMod) and
+// every one of each one's own params -- not just a single headline param
+// each -- add one of each of the 5 source types (GranularSynth exercises
+// its async worklet init), flip row/column precedence, tempo, and step
+// count, and play -- all with zero console errors.
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
@@ -24,18 +25,6 @@ function fail(message) {
 
 function ok(message) {
   console.log(`ok: ${message}`);
-}
-
-/** An "override" field is a checkbox + a value control together (see
- * fields.ts) -- this locator scoping matches both without depending on
- * DOM order. Used by cell-level note/gain/gate/time-shift fields. */
-function overrideField(page, label) {
-  const field = page.locator(".panel-field", { hasText: label });
-  return {
-    field,
-    checkbox: field.locator(".override-control input[type=checkbox]"),
-    input: field.locator(".override-control input[type=range]"),
-  };
 }
 
 /** A panel section (Defaults/Envelope/Effects) is a titled group with its
@@ -56,7 +45,40 @@ function section(page, title) {
     automationSvg() {
       return root.locator(".automation-svg");
     },
+    // An effect's own on/off checkbox (see effectToggle below), scoped to
+    // this section.
+    effectToggle(effectLabel) {
+      return effectToggle(root, effectLabel);
+    },
+    // One of an effect's own params (see effectParam below), scoped to
+    // this section.
+    effectParam(effectLabel, paramLabel) {
+      return effectParam(root, effectLabel, paramLabel);
+    },
   };
+}
+
+/** effectsFields (see gridView.ts) renders one checkbox field per effect
+ * type -- its label is exactly the effect's name, e.g. "Filter" -- followed
+ * by that effect's own params as separate fields labeled "Filter: Cutoff
+ * (Hz)" etc. `hasText` alone would also match every one of those param
+ * rows (their labels all start with "Filter"), so this needs an *exact*
+ * label match to land on the checkbox row specifically. */
+function effectToggle(scope, effectLabel) {
+  return scope
+    .locator(`.panel-field:has(label:text-is("${effectLabel}"))`)
+    .locator("input[type=checkbox]");
+}
+
+/** One of an effect's own param fields -- labeled "<Effect>: <Param>",
+ * e.g. "Filter: Cutoff (Hz)" -- a plain range or select field, always
+ * interactive regardless of the effect's own checkbox state (see
+ * gridView.ts's effectsFields doc for why that's a deliberate
+ * unification, not a bug). */
+function effectParam(scope, effectLabel, paramLabel) {
+  return scope.locator(".panel-field", {
+    hasText: `${effectLabel}: ${paramLabel}`,
+  });
 }
 
 /** Drags an automation editor's Nth handle to roughly (fracX, fracY) of the
@@ -338,34 +360,67 @@ if ((await durationField.count()) === 0) {
 await triggerModeSelect.selectOption("gatedToStep");
 await page.waitForTimeout(50);
 
-// Row menu should show all four effect toggles, each already paired with
-// its (disabled-until-checked) param control -- nothing conditionally
+// Row menu should show all 6 effect types and *all* of each one's own
+// params (not just a single headline param each) -- nothing conditionally
 // appears/disappears as a side effect of *other* fields any more.
 const menuText = await page.locator(".config-panel").innerText();
-for (const label of ["Filter", "Distortion", "Delay", "Compressor"]) {
+const expectedEffectLabels = [
+  "Filter",
+  "Filter: Filter type",
+  "Filter: Cutoff (Hz)",
+  "Filter: Resonance (Q)",
+  "Filter: Wet",
+  "Distortion",
+  "Distortion: Amount",
+  "Distortion: Output gain",
+  "Distortion: Wet",
+  "Delay",
+  "Delay: Time (ms)",
+  "Delay: Feedback",
+  "Delay: Wet",
+  "Compressor",
+  "Compressor: Threshold (dB)",
+  "Compressor: Ratio",
+  "Compressor: Attack (ms)",
+  "Compressor: Release (ms)",
+  "Compressor: Wet",
+  "Tremolo",
+  "Tremolo: Rate (Hz)",
+  "Tremolo: Depth",
+  "Tremolo: LFO shape",
+  "Tremolo: Wet",
+  "Ring Mod",
+  "Ring Mod: Frequency (Hz)",
+  "Ring Mod: Carrier shape",
+  "Ring Mod: Wet",
+];
+for (const label of expectedEffectLabels) {
   if (!menuText.includes(label))
-    fail(`row panel missing "${label}" effect toggle`);
+    fail(`row panel missing "${label}" effect control`);
 }
-ok("row panel shows all effect toggles without needing to reopen anything");
+ok("row panel shows every effect type and all of each one's own params");
 
-const filterOverride = overrideField(page, "Filter");
-if (!(await filterOverride.input.isDisabled())) {
-  fail("Filter's param control should start disabled");
-}
-await filterOverride.checkbox.click();
-await page.waitForTimeout(50);
-if (await filterOverride.input.isDisabled()) {
-  fail("Filter's param control should enable immediately on check");
+const filterToggle = effectToggle(page, "Filter");
+const filterCutoff = effectParam(page, "Filter", "Cutoff (Hz)");
+const filterCutoffInput = filterCutoff.locator("input[type=range]");
+if (await filterCutoffInput.isDisabled()) {
+  fail("Filter's param controls should always be interactive, checkbox or not");
 } else {
-  ok("effect toggle enables its param control immediately, in place");
+  ok("effect param controls are interactive before their checkbox is on");
 }
+await filterToggle.click();
+await page.waitForTimeout(50);
 
-// Regression: toggling an effect on and then dragging its value, with no
-// render in between, used to silently revert the toggle -- the value
-// handler closed over the pre-toggle effects array. Reselecting away and
-// back forces a render from live model state, exposing the bug if it's
-// back.
-await filterOverride.input.evaluate((el) => {
+// Regression: toggling an effect on and then dragging one of its values,
+// with no render in between, used to silently revert the toggle -- the
+// value handler closed over the pre-toggle effects array. Reselecting
+// away and back forces a render from live model state, exposing the bug
+// if it's back.
+const filterTypeSelect = effectParam(page, "Filter", "Filter type").locator(
+  "select",
+);
+await filterTypeSelect.selectOption("highpass");
+await filterCutoffInput.evaluate((el) => {
   el.value = "3500";
   el.dispatchEvent(new Event("input", { bubbles: true }));
 });
@@ -378,16 +433,24 @@ await page
   .locator(".row-master", { hasText: "Kicker" })
   .click({ button: "right" });
 await page.waitForTimeout(50);
-const filterOverrideAfter = overrideField(page, "Filter");
-if (!(await filterOverrideAfter.checkbox.isChecked())) {
+if (!(await effectToggle(page, "Filter").isChecked())) {
   fail("effect toggle+drag reverted the toggle (stale-closure regression)");
 }
-if ((await filterOverrideAfter.input.inputValue()) !== "3500") {
-  fail(
-    `effect value did not persist after toggle+drag: expected 3500, got ${await filterOverrideAfter.input.inputValue()}`,
-  );
+if (
+  (await effectParam(page, "Filter", "Cutoff (Hz)")
+    .locator("input[type=range]")
+    .inputValue()) !== "3500"
+) {
+  fail("effect param value did not persist after toggle+drag");
+}
+if (
+  (await effectParam(page, "Filter", "Filter type")
+    .locator("select")
+    .inputValue()) !== "highpass"
+) {
+  fail("effect select-kind param value did not persist after toggle+drag");
 } else {
-  ok("effect toggle survives a value drag with no render in between");
+  ok("effect toggle and param values survive a drag with no render in between");
 }
 
 // Regression: enabling Delay used to silence the row entirely, even the
@@ -396,8 +459,7 @@ if ((await filterOverrideAfter.input.inputValue()) !== "3500") {
 // percussive hit never got heard at all. This can't assert on audio
 // samples from here, but it does confirm the row keeps firing (playhead
 // still advances) and nothing throws with delay active.
-const delayOverride = overrideField(page, "Delay");
-await delayOverride.checkbox.click();
+await effectToggle(page, "Delay").click();
 await page.waitForTimeout(50);
 await page.click("#play-button");
 await page.waitForTimeout(600);
@@ -442,20 +504,17 @@ if (
 ) {
   fail("cell Effects section should start dimmed (override off)");
 }
-const cellFilterCheckbox = cellEffects
-  .field("Filter")
-  .locator("input[type=checkbox]");
-const cellFilterInput = cellEffects
-  .field("Filter")
+const cellFilterCutoffInput = cellEffects
+  .effectParam("Filter", "Cutoff (Hz)")
   .locator("input[type=range]");
-if (await cellFilterInput.isDisabled()) {
+if (await cellFilterCutoffInput.isDisabled()) {
   fail("dimmed cell effects controls should stay interactive, not disabled");
 } else {
   ok("cell Effects section starts dimmed but interactive");
 }
-await cellFilterCheckbox.click();
+await cellEffects.effectToggle("Filter").click();
 await page.waitForTimeout(50);
-await cellFilterInput.evaluate((el) => {
+await cellFilterCutoffInput.evaluate((el) => {
   el.value = "2200";
   el.dispatchEvent(new Event("input", { bubbles: true }));
 });
@@ -478,20 +537,18 @@ if (
     "cell Effects section should no longer be dimmed once override is active",
   );
 }
-const cellFilterCheckboxAfter = cellEffectsAfter
-  .field("Filter")
-  .locator("input[type=checkbox]");
-const cellFilterInputAfter = cellEffectsAfter
-  .field("Filter")
-  .locator("input[type=range]");
-if (!(await cellFilterCheckboxAfter.isChecked())) {
+if (!(await cellEffectsAfter.effectToggle("Filter").isChecked())) {
   fail(
     "cell effect checkbox set while dimmed did not survive activating override",
   );
 }
-if ((await cellFilterInputAfter.inputValue()) !== "2200") {
+const cellFilterCutoffAfter = await cellEffectsAfter
+  .effectParam("Filter", "Cutoff (Hz)")
+  .locator("input[type=range]")
+  .inputValue();
+if (cellFilterCutoffAfter !== "2200") {
   fail(
-    `cell effect value set while dimmed did not persist: expected 2200, got ${await cellFilterInputAfter.inputValue()}`,
+    `cell effect value set while dimmed did not persist: expected 2200, got ${cellFilterCutoffAfter}`,
   );
 } else {
   ok("cell effects configured while dimmed persist once override is activated");
