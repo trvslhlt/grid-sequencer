@@ -489,6 +489,20 @@ export class GridModel {
     };
   }
 
+  /** How long the row's trimmed sample range actually lasts, in seconds --
+   * Infinity when there's no buffer yet (no constraint to apply) or the
+   * row isn't a samplePlayer at all. Shared by both samplePlayer firing
+   * paths (the row's own shared instance in fireTick, and
+   * fireSamplePlayerOverride's fresh per-hit node) so an envelope curve
+   * never outlives the raw audio bruit-kit's SamplePlayer already hard-
+   * stops at this same point (see its noteOn). */
+  private sampleRangeSeconds(runtime: RowRuntime): number {
+    const buffer = runtime.sampleBuffer;
+    if (!buffer) return Number.POSITIVE_INFINITY;
+    const { start, end } = runtime.config.sampleRange;
+    return Math.max(0, Math.abs(end - start)) * buffer.duration;
+  }
+
   private fireTick(
     stepIndex: number,
     atTime: number,
@@ -553,11 +567,24 @@ export class GridModel {
         // affect a voice already firing. Every noteOn goes out at full
         // velocity since gain is entirely carried by this curve's own
         // valueRange max, not by scaling the source's per-voice peak.
+        //
+        // For a samplePlayer row, clamped to the trimmed sample range's
+        // own length when that's shorter than the gate -- bruit-kit's
+        // SamplePlayer hard-stops the raw buffer there regardless of gate
+        // (see its noteOn), so scheduling the curve over the *longer*
+        // gateSeconds would leave the user's own envelope shape -- in
+        // particular whatever release they drew near the end of it --
+        // silently pre-empted by that hard stop instead of actually
+        // playing out.
+        const envelopeDuration =
+          runtime.config.sourceType === "samplePlayer"
+            ? Math.min(gateSeconds, this.sampleRangeSeconds(runtime))
+            : gateSeconds;
         scheduleAutomation(
           runtime.envelopeGain.gain,
           resolved.envelope.points,
           this.audioContext,
-          gateSeconds,
+          envelopeDuration,
           { min: 0, max: resolved.gain },
           shiftedAtTime,
         );
@@ -616,16 +643,22 @@ export class GridModel {
     // This node is spawned fresh per hit (unlike envelopeGain, which is
     // persistent per row), so the curve's own position-1 point is the
     // note's real end -- no extra release tail to account for the way
-    // triggerRelease's return value used to.
+    // triggerRelease's return value used to. Clamped to the trimmed
+    // range's own length, not just gateSeconds: source.start()'s duration
+    // argument above hard-cuts the raw buffer at atTime + durationSeconds
+    // with no fade of its own, so if the range is trimmed shorter than
+    // the gate, scheduling the curve over the *longer* gateSeconds would
+    // leave it mid-ramp (a pop) when the buffer stops out from under it.
+    const effectiveDuration = Math.min(gateSeconds, durationSeconds);
     scheduleAutomation(
       gainNode.gain,
       envelope.points,
       this.audioContext,
-      gateSeconds,
+      effectiveDuration,
       { min: 0, max: gain },
       atTime,
     );
-    const endTime = atTime + gateSeconds;
+    const endTime = atTime + effectiveDuration;
     source.stop(endTime);
     source.onended = () => {
       source.disconnect();
