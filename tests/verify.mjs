@@ -5,20 +5,22 @@
 // never lets one side win unconditionally regardless of its own toggle),
 // drag an Envelope section's breakpoint-curve editor and confirm it persists, a sample
 // row's playback range view (drag handles trim which portion of the
-// buffer plays, also persisted), the sample library (category-tagged
-// uploads reusable across every needsSample row, loading from the library
-// swaps a row's buffer), the explicitDuration trigger mode's
-// steps-based duration field, all 6 effect types (filter/distortion/
-// delay/compressor/tremolo/ringMod) and every one of each one's own
-// params -- not just a single headline param each -- add one of each of
-// the 5 source types (GranularSynth exercises its async worklet init),
-// flip row/column precedence, tempo, step count, and the global key/scale
-// (playback keeps working, note fields stay untouched by the silent
-// snap), patch persistence
-// (save under a name, reload the page for a genuinely fresh context,
-// confirm "demo" loads by default and the saved patch round-trips
-// through the real backend), recording audio out to a real WAV download,
-// and play -- all with zero console errors.
+// buffer plays, also persisted), the main page's select-only Sample/
+// Instrument Library panels (collapsible trees, click-to-assign onto the
+// selected row, instrument presets grey out on a source-type mismatch),
+// the library management page (in-app toggle, not a route -- full CRUD:
+// add/rename/re-categorize/delete a sample, edit/delete an instrument
+// preset), the explicitDuration trigger mode's steps-based duration
+// field, all 6 effect types (filter/distortion/delay/compressor/tremolo/
+// ringMod) and every one of each one's own params -- not just a single
+// headline param each -- add one of each of the 5 source types
+// (GranularSynth exercises its async worklet init), flip row/column
+// precedence, tempo, step count, and the global key/scale (playback keeps
+// working, note fields stay untouched by the silent snap), patch
+// persistence (save under a name, reload the page for a genuinely fresh
+// context, confirm "demo" loads by default and the saved patch
+// round-trips through the real backend), recording audio out to a real
+// WAV download, and play -- all with zero console errors.
 import { readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -158,9 +160,12 @@ page.on("console", (msg) => {
 page.on("requestfailed", (req) =>
   errors.push(`requestfailed: ${req.url()} ${req.failure()?.errorText}`),
 );
-// Save-overwrite and load-replace both confirm() -- always accept, an
-// unhandled dialog would otherwise hang the run.
-page.on("dialog", (dialog) => dialog.accept());
+// Every dialog-triggering action below attaches its own page.once("dialog",
+// ...) immediately before the click that opens it -- not a single global
+// page.on("dialog", ...) handler, since this file also drives window.prompt()
+// dialogs (rename/save-preset flows) that need real text typed into them,
+// and a blanket handler registered once at the top would race every later
+// one to resolve each dialog first (with no text), not just confirm()'s.
 
 await page.goto(baseUrl, { waitUntil: "networkidle" });
 await page.click("#unlock button");
@@ -468,83 +473,130 @@ if ((await rangeSvg.count()) === 0) {
   }
 }
 
-// Sample library: category-tagged uploads become reusable across every
-// needsSample row, not just the one that uploaded them (see gridView.ts's
-// getAvailableSamples/onLoadFromLibrary and main.ts's availableSamples
-// cache). Kicker (still selected) already has demo-seeded siblings
-// ("Kick blip"/percussion, "Pad blip"/pad) to pick from.
-const uploadCategorySelect = page
-  .locator(".panel-field", { hasText: "Category (for next upload)" })
-  .locator("select");
-if ((await uploadCategorySelect.count()) === 0) {
-  fail("sample row missing the upload-category select");
-} else {
-  ok("sample row shows an upload-category select");
-}
-
-const librarySelect = page
-  .locator(".panel-field", { hasText: "Sample library" })
-  .locator("select");
-const libraryOptionLabels = await librarySelect
-  .locator("option")
-  .allTextContents();
-if (
-  !libraryOptionLabels.some((l) => l.includes("percussion")) ||
-  !libraryOptionLabels.some((l) => l.includes("pad"))
-) {
+// Sample library: a select-only third-column panel now, not a per-row
+// picker -- see main.ts's renderLibraryPanels/assignSampleToRow and
+// libraryTree.ts. The row panel just shows a read-only "Sample" field.
+const sampleField = page
+  .locator(".panel-field", { hasText: "Sample" })
+  .locator("input[type=text]");
+if ((await sampleField.count()) === 0 || !(await sampleField.isDisabled())) {
   fail(
-    `library select should list demo-seeded samples grouped by category, got: ${libraryOptionLabels.join(", ")}`,
+    'row panel should show a read-only "Sample" field, not loading controls',
   );
 } else {
-  ok("library select lists existing samples with their category prefix");
+  ok('row panel shows a read-only "Sample" field');
+}
+if ((await page.locator("button:has-text('Load sample')").count()) !== 0) {
+  fail('the old per-row "Load sample…" button should be gone');
+} else {
+  ok('per-row "Load sample…" button is gone (library-only now)');
 }
 
-// Load a different sample from the library onto Kicker and confirm the
+async function expandGroup(containerSelector, label) {
+  const summary = page.locator(`${containerSelector} summary`, {
+    hasText: label,
+  });
+  await summary.click();
+  await page.waitForTimeout(80);
+}
+
+await expandGroup("#sample-library", "percussion");
+const percussionSamples = page.locator(
+  "#sample-library .library-tree-item button",
+);
+if ((await percussionSamples.count()) === 0) {
+  fail("sample library's percussion group has no items");
+} else {
+  ok("sample library groups by category, collapsed by default until expanded");
+}
+
+// Load a different sample onto Kicker (still selected) and confirm the
 // waveform view updates (proof a new buffer actually loaded, not just a
-// dropdown selection with no effect).
-const padOption = await librarySelect
-  .locator("option", { hasText: "Pad blip" })
-  .getAttribute("value");
-await librarySelect.selectOption(padOption);
-await page.click("button:has-text('Load from library')");
+// tree click with no effect). "Pad blip" is guaranteed to exist -- every
+// fresh backend's demo seeding uploads it -- unlike anything from the
+// separate, manually-run scripts/seed-sample-library.mjs, which `make
+// verify` must not depend on.
+await expandGroup("#sample-library", "pad");
+await page
+  .locator("#sample-library .library-tree-item button", { hasText: "Pad blip" })
+  .click();
 await page.waitForTimeout(400);
 if ((await page.locator(".waveform-range-svg").count()) === 0) {
-  fail("loading a sample from the library did not leave a buffer loaded");
+  fail("assigning a sample from the library did not leave a buffer loaded");
 } else {
-  ok("loading a sample from the library swaps the row's buffer");
+  ok("clicking a library sample assigns it to the selected row");
+}
+if ((await sampleField.inputValue()) !== "Pad blip") {
+  fail(
+    `row panel's read-only Sample field should now read "Pad blip", got "${await sampleField.inputValue()}"`,
+  );
+} else {
+  ok("row panel's read-only Sample field reflects the newly-assigned sample");
 }
 
-// Upload a fresh local file under a chosen category, then confirm it shows
-// up -- correctly tagged -- in a *different* row's library picker (proof
-// the upload is shared app-wide, not scoped to the row that uploaded it).
-await uploadCategorySelect.selectOption("fx");
-const tinyWavPath = await writeTinyWavFixture();
-const [fileChooser] = await Promise.all([
-  page.waitForEvent("filechooser"),
-  page.click("button:has-text('Load sample…')"),
-]);
-await fileChooser.setFiles(tinyWavPath);
-await page.waitForTimeout(600);
-
-// Pad (granularSynth) also needsSample -- Synth (oscillatorSynth) doesn't
-// and has no library picker at all.
+// Clicking a sample with no row selected (or a non-sample row selected)
+// should hint, not silently no-op or throw.
+await page.locator("#master-button").click();
+await page.waitForTimeout(50);
 await page
-  .locator(".row-master", { hasText: "Pad" })
+  .locator("#sample-library .library-tree-item button", {
+    hasText: "Kick blip",
+  })
+  .click();
+await page.waitForTimeout(100);
+if ((await page.locator(".library-hint").count()) === 0) {
+  fail("clicking a library sample with no eligible row selected should hint");
+} else {
+  ok("clicking a library sample with nothing eligible selected shows a hint");
+}
+
+// Instrument presets: save one from an oscillatorSynth row (Synth), then
+// confirm it only reads as usable (not .incompatible) on a same-source-
+// type row, greying out on a different one.
+await page
+  .locator(".row-master", { hasText: "Synth" })
   .click({ button: "right" });
 await page.waitForTimeout(50);
-const padLibraryOptions = await page
-  .locator(".panel-field", { hasText: "Sample library" })
-  .locator("select option")
-  .allTextContents();
-if (!padLibraryOptions.some((l) => l.startsWith("fx — Kicker"))) {
+page.once("dialog", (dialog) => dialog.accept("Verify Preset"));
+await page.locator("button", { hasText: "Save as instrument preset" }).click();
+await page.waitForTimeout(400);
+
+await expandGroup("#instrument-library", "Oscillator");
+const presetItem = page.locator("#instrument-library .library-tree-item", {
+  hasText: "Verify Preset",
+});
+if ((await presetItem.count()) === 0) {
+  fail("saved instrument preset does not appear in the instrument library");
+} else if (
+  await presetItem.evaluate((el) => el.classList.contains("incompatible"))
+) {
   fail(
-    `newly-uploaded sample should appear as "fx — Kicker" in other rows' library lists, got: ${padLibraryOptions.join(", ")}`,
+    "preset should read as compatible while its own source-type row is selected",
   );
 } else {
   ok(
-    "a local upload's chosen category and row name appear in other rows' library pickers",
+    "saving an instrument preset makes it appear, usable, in the instrument library",
   );
 }
+
+await page
+  .locator(".row-master", { hasText: "Bass" })
+  .click({ button: "right" });
+await page.waitForTimeout(50);
+if (
+  !(await page
+    .locator("#instrument-library .library-tree-item", {
+      hasText: "Verify Preset",
+    })
+    .evaluate((el) => el.classList.contains("incompatible")))
+) {
+  fail(
+    "preset should read as incompatible once a different-source-type row is selected",
+  );
+} else {
+  ok("instrument presets grey out on rows whose source type doesn't match");
+}
+
 await page
   .locator(".row-master", { hasText: "Kicker" })
   .click({ button: "right" });
@@ -576,7 +628,7 @@ await page.waitForTimeout(50);
 // labels are unprefixed (no "Filter: " before "Cutoff (Hz)") -- the
 // checkbox row reads as that group's own heading -- so "Wet" only needs
 // checking once even though every effect has one.
-const menuText = await page.locator(".config-panel").innerText();
+const menuText = await page.locator(".selection-panel").innerText();
 const expectedEffectLabels = [
   "Filter",
   "Filter type",
@@ -867,7 +919,7 @@ await page.waitForTimeout(50);
 if ((await page.locator(".panel-title").textContent()) !== "Master") {
   fail("master panel title should read exactly 'Master'");
 }
-const masterText = await page.locator(".config-panel").innerText();
+const masterText = await page.locator(".selection-panel").innerText();
 for (const label of ["Gain", "Filter", "Limiter ceiling", "Limiter release"]) {
   if (!masterText.includes(label)) fail(`master panel missing "${label}"`);
 }
@@ -918,8 +970,15 @@ for (const sourceType of ["granularSynth", "noiseGenerator", "fmSynth"]) {
 // tripped through the backend.
 const TEST_PATCH_NAME = "verify-test-patch";
 await page.fill("#patch-name", TEST_PATCH_NAME);
+// This confirm() is conditional (only fires on a name conflict, i.e. every
+// run after the first) -- page.once() that never gets consumed would stay
+// armed and steal the *next* dialog anywhere later in the run, so it's
+// explicitly torn down instead of just left to fire-or-not.
+const acceptSaveConflict = (dialog) => dialog.accept();
+page.once("dialog", acceptSaveConflict);
 await page.click("#save-patch-button");
 await page.waitForTimeout(300);
+page.off("dialog", acceptSaveConflict);
 if ((await page.locator("#patch-status").textContent()) !== "Saved") {
   fail("saving a patch did not report success");
 } else {
@@ -966,6 +1025,7 @@ if (!patchOptionValue) {
   fail(`"${TEST_PATCH_NAME}" missing from the patch list after reload`);
 } else {
   await page.selectOption("#patch-select", patchOptionValue);
+  page.once("dialog", (dialog) => dialog.accept());
   await page.click("#load-patch-button");
   await page.waitForTimeout(500);
   const loadedRowCount = await page.locator(".row-master").count();
@@ -986,6 +1046,151 @@ if (!patchOptionValue) {
     ok("saved patch round-trips its key/scale through the backend");
   }
 }
+
+// Library management page: full CRUD for samples and instrument presets,
+// toggled in-app (no route change) via "Manage Library" -- the only place
+// a brand-new local sample file can be added now (see main.ts's
+// addSampleButtonEl handler).
+await page.click("#manage-library-button");
+await page.waitForTimeout(200);
+if (
+  !(await page
+    .locator("#sequencer-view")
+    .evaluate((el) => el.classList.contains("hidden"))) ||
+  (await page
+    .locator("#library-management-view")
+    .evaluate((el) => el.classList.contains("hidden")))
+) {
+  fail("Manage Library button should swap to the management view");
+} else {
+  ok("Manage Library button toggles to the management page");
+}
+
+const managementWavPath = await writeTinyWavFixture();
+const [managementFileChooser] = await Promise.all([
+  page.waitForEvent("filechooser"),
+  page.click("#add-sample-button"),
+]);
+page.once("dialog", (dialog) => dialog.accept("Verify Upload"));
+await managementFileChooser.setFiles(managementWavPath);
+await page.waitForTimeout(600);
+
+await expandGroup("#sample-management", "other");
+const uploadedRow = page.locator("#sample-management .management-row", {
+  hasText: "Verify Upload",
+});
+if ((await uploadedRow.count()) === 0) {
+  fail("newly-added local sample should appear in the management page");
+} else {
+  ok('management page\'s "+ Add sample" is now the only local-upload path');
+}
+
+// Rename it.
+page.once("dialog", (dialog) => dialog.accept("Verify Upload Renamed"));
+await uploadedRow.locator("button", { hasText: "Rename" }).click();
+await page.waitForTimeout(300);
+const renamedRow = page.locator("#sample-management .management-row", {
+  hasText: "Verify Upload Renamed",
+});
+if ((await renamedRow.count()) === 0) {
+  fail("renaming a sample in the management page did not take effect");
+} else {
+  ok("management page renames a sample");
+}
+
+// Re-categorize it, then confirm it moved groups (the tree stays expanded
+// across the rebuild -- see libraryTree.ts's openLabels handling).
+await renamedRow.locator("select").selectOption("fx");
+await page.waitForTimeout(300);
+await expandGroup("#sample-management", "fx");
+if (
+  (await page
+    .locator("#sample-management .management-row", {
+      hasText: "Verify Upload Renamed",
+    })
+    .count()) === 0
+) {
+  fail("re-categorizing a sample in the management page did not move it");
+} else {
+  ok("management page re-categorizes a sample");
+}
+
+// Delete it.
+page.once("dialog", (dialog) => dialog.accept());
+await page
+  .locator("#sample-management .management-row", {
+    hasText: "Verify Upload Renamed",
+  })
+  .locator("button", { hasText: "Delete" })
+  .click();
+await page.waitForTimeout(300);
+if (
+  (await page
+    .locator("#sample-management", { hasText: "Verify Upload Renamed" })
+    .count()) !== 0
+) {
+  fail("deleting a sample in the management page did not remove it");
+} else {
+  ok("management page deletes a sample");
+}
+
+// Instrument preset editing: expand "Verify Preset" (saved earlier from
+// the Synth row), change a param, save, and confirm it persisted.
+await expandGroup("#instrument-preset-management", "Oscillator");
+const presetManagementRow = page.locator(
+  "#instrument-preset-management .library-tree-item",
+  { hasText: "Verify Preset" },
+);
+await presetManagementRow.locator("button", { hasText: "Edit" }).click();
+await page.waitForTimeout(200);
+const detuneInput = presetManagementRow
+  .locator(".panel-field", { hasText: "Detune" })
+  .locator("input[type=range]");
+await detuneInput.evaluate((el) => {
+  el.value = "42";
+  el.dispatchEvent(new Event("input", { bubbles: true }));
+});
+await presetManagementRow
+  .locator("button", { hasText: "Save changes" })
+  .click();
+await page.waitForTimeout(400);
+const presetManagementRowAfter = page.locator(
+  "#instrument-preset-management .library-tree-item",
+  { hasText: "Verify Preset" },
+);
+await presetManagementRowAfter.locator("button", { hasText: "Edit" }).click();
+await page.waitForTimeout(200);
+const detuneAfterSave = await presetManagementRowAfter
+  .locator(".panel-field", { hasText: "Detune" })
+  .locator("input[type=range]")
+  .inputValue();
+if (detuneAfterSave !== "42") {
+  fail(
+    `management page's preset edit should persist: expected detune 42, got ${detuneAfterSave}`,
+  );
+} else {
+  ok("management page edits an instrument preset's own params and it persists");
+}
+
+// Delete it.
+page.once("dialog", (dialog) => dialog.accept());
+await presetManagementRowAfter.locator("button", { hasText: "Delete" }).click();
+await page.waitForTimeout(300);
+if (
+  (await page
+    .locator("#instrument-preset-management", { hasText: "Verify Preset" })
+    .count()) !== 0
+) {
+  fail(
+    "deleting an instrument preset in the management page did not remove it",
+  );
+} else {
+  ok("management page deletes an instrument preset");
+}
+
+// Back to the sequencer.
+await page.click("#manage-library-button");
+await page.waitForTimeout(200);
 
 // Play / stop.
 await page.click("#play-button");

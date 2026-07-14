@@ -150,3 +150,79 @@ export async function fetchSampleAudio(id: string): Promise<ArrayBuffer> {
   if (!response.ok) throw new Error(`Failed to fetch sample ${id}`);
   return response.arrayBuffer();
 }
+
+export async function updateSample(
+  id: string,
+  patch: { name?: string; category?: string },
+): Promise<SampleMetadata> {
+  const response = await fetch(`/api/samples/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  if (!response.ok) throw new Error(`Failed to update sample ${id}`);
+  return response.json();
+}
+
+export async function deleteSample(id: string): Promise<void> {
+  const response = await fetch(`/api/samples/${id}`, { method: "DELETE" });
+  if (!response.ok) throw new Error(`Failed to delete sample ${id}`);
+}
+
+/** A saved instrument sound -- source type + that source's own params +
+ * envelope shape, kept just as opaque here as the backend's own store
+ * (see instrumentPresetStore.ts's doc comment): this module never
+ * inspects sourceParams/envelope internals, just passes them through. */
+export interface InstrumentPreset {
+  id: string;
+  name: string;
+  sourceType: string;
+  sourceParams: Record<string, unknown>;
+  envelope: unknown;
+  createdAt: string;
+}
+
+export async function listInstrumentPresets(): Promise<InstrumentPreset[]> {
+  const response = await fetch("/api/instrument-presets");
+  const body: { presets: InstrumentPreset[] } = await response.json();
+  return body.presets;
+}
+
+export async function createInstrumentPreset(preset: {
+  name: string;
+  sourceType: string;
+  sourceParams: Record<string, unknown>;
+  envelope: unknown;
+}): Promise<InstrumentPreset> {
+  const response = await fetch("/api/instrument-presets", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(preset),
+  });
+  if (!response.ok) throw new Error("Failed to save instrument preset");
+  return response.json();
+}
+
+export async function updateInstrumentPreset(
+  id: string,
+  patch: {
+    name?: string;
+    sourceParams?: Record<string, unknown>;
+    envelope?: unknown;
+  },
+): Promise<InstrumentPreset> {
+  const response = await fetch(`/api/instrument-presets/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  if (!response.ok) throw new Error(`Failed to update preset ${id}`);
+  return response.json();
+}
+
+export async function deleteInstrumentPreset(id: string): Promise<void> {
+  const response = await fetch(`/api/instrument-presets/${id}`, {
+    method: "DELETE",
+  });
+  if (!response.ok) throw new Error(`Failed to delete preset ${id}`);
+}

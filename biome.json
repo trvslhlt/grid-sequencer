@@ -1,7 +1,13 @@
 {
   "$schema": "https://biomejs.dev/schemas/1.9.4/schema.json",
   "files": {
-    "ignore": ["dist", "node_modules", "backend/patches", "backend/samples"]
+    "ignore": [
+      "dist",
+      "node_modules",
+      "backend/patches",
+      "backend/samples",
+      "backend/instrumentPresets"
+    ]
   },
   "formatter": {
     "enabled": true,

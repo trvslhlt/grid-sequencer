@@ -94,3 +94,38 @@ export async function writeSample(
     JSON.stringify(sidecar, null, 2),
   );
 }
+
+/** Rewrites just the sidecar's name/category -- the audio file itself
+ * (and its id/filename) are untouched, same reasoning as this store never
+ * needing a mimeType<->extension mapping in reverse. */
+export async function updateSampleMetadata(
+  id: string,
+  patch: { name?: string; category?: string },
+): Promise<SampleMetadata | null> {
+  const sidecar = await readSidecar(id);
+  if (!sidecar) return null;
+  const updated: Sidecar = {
+    ...sidecar,
+    name: patch.name?.trim() || sidecar.name,
+    category: patch.category?.trim() || sidecar.category,
+  };
+  await fs.writeFile(
+    path.join(SAMPLES_DIR, `${id}.json`),
+    JSON.stringify(updated, null, 2),
+  );
+  return {
+    id,
+    name: updated.name,
+    mimeType: updated.mimeType,
+    createdAt: updated.createdAt,
+    category: updated.category ?? "uncategorized",
+  };
+}
+
+export async function deleteSample(id: string): Promise<boolean> {
+  const sidecar = await readSidecar(id);
+  if (!sidecar) return false;
+  await fs.unlink(path.join(SAMPLES_DIR, sidecar.filename)).catch(() => {});
+  await fs.unlink(path.join(SAMPLES_DIR, `${id}.json`)).catch(() => {});
+  return true;
+}

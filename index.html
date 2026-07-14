@@ -20,6 +20,7 @@
         <button id="play-button">Play</button>
         <button id="stop-button">Stop</button>
         <button id="master-button">Master…</button>
+        <button id="manage-library-button">Manage Library</button>
         <button id="record-button">Record</button>
         <span id="record-status" class="status-text"></span>
         <label>
@@ -51,18 +52,49 @@
           <select id="scale-select"></select>
         </label>
       </div>
-      <div id="grid"></div>
-      <div class="add-row">
-        <select id="new-row-type"></select>
-        <input id="new-row-name" type="text" placeholder="Row name" />
-        <button id="add-row-button">Add row</button>
+      <div id="sequencer-view">
+        <div class="main-layout">
+          <div id="grid"></div>
+          <div class="library-column">
+            <div class="config-panel library-panel">
+              <div class="library-panel-title-row">
+                <span class="library-panel-title">Sample Library</span>
+              </div>
+              <div id="sample-library"></div>
+            </div>
+            <div class="config-panel library-panel">
+              <div class="library-panel-title-row">
+                <span class="library-panel-title">Instrument Library</span>
+              </div>
+              <div id="instrument-library"></div>
+            </div>
+          </div>
+        </div>
+        <div class="add-row">
+          <select id="new-row-type"></select>
+          <input id="new-row-name" type="text" placeholder="Row name" />
+          <button id="add-row-button">Add row</button>
+        </div>
+        <div class="patch-controls">
+          <input id="patch-name" type="text" placeholder="Patch name" />
+          <button id="save-patch-button">Save</button>
+          <select id="patch-select"></select>
+          <button id="load-patch-button">Load</button>
+          <span id="patch-status" class="status-text"></span>
+        </div>
       </div>
-      <div class="patch-controls">
-        <input id="patch-name" type="text" placeholder="Patch name" />
-        <button id="save-patch-button">Save</button>
-        <select id="patch-select"></select>
-        <button id="load-patch-button">Load</button>
-        <span id="patch-status" class="status-text"></span>
+      <div id="library-management-view" class="hidden">
+        <div class="management-section">
+          <div class="management-section-header">
+            <h2>Samples</h2>
+            <button id="add-sample-button">+ Add sample…</button>
+          </div>
+          <div id="sample-management"></div>
+        </div>
+        <div class="management-section">
+          <h2>Instrument Presets</h2>
+          <div id="instrument-preset-management"></div>
+        </div>
       </div>
     </div>
   </body>

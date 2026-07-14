@@ -245,32 +245,45 @@ make run-image-backend
   or granular synth) and a name, then **Add row**. Granular-synth rows
   take a moment to initialize (loads an `AudioWorklet`). Source type is
   fixed at creation; everything else (trigger mode, defaults, reverb send,
-  effect chain, sample loading, per-source-type params like waveform or
-  grain density) lives in that row's panel. A row's "Duration (steps)"
-  field (shown when its trigger mode is "Explicit duration") is a count of
-  grid steps, not seconds, so it scales with tempo instead of needing
-  hand re-tuning after a BPM change.
+  effect chain, per-source-type params like waveform or grain density)
+  lives in that row's panel. A row's "Duration (steps)" field (shown when
+  its trigger mode is "Explicit duration") is a count of grid steps, not
+  seconds, so it scales with tempo instead of needing hand re-tuning after
+  a BPM change.
+- **Sample & Instrument Library panels** (right column, top/bottom): the
+  only way samples and instrument sounds get onto a row now — right-click
+  a row to select it, then click an item in either tree to apply it.
+  Both panels are select-only and read the *whole* library (grouped
+  collapsibly: samples by category, instrument presets by source type,
+  collapsed until you expand a group) — adding, renaming, re-categorizing,
+  or deleting library items happens on the separate **Manage Library**
+  page (top bar), not here. An instrument preset only applies (and shows
+  enabled rather than greyed out) when the selected row's source type
+  matches the preset's — a preset is source type + that source's own
+  params + envelope shape, saved via a row panel's own **Save as
+  instrument preset…** button. `make seed-samples` populates the sample
+  library with 18 procedurally synthesized sounds spanning every category
+  (kick, snare, hats, clap, tom, sub/pluck/growl bass, three lead flavors,
+  two pads, and three fx sweeps) — see `scripts/seed-sample-library.mjs`,
+  a standalone Node script (no browser, no npm deps) that synthesizes raw
+  PCM by hand and uploads it the same way the management page's own
+  "+ Add sample" would.
+- **Manage Library page** (top bar, in-app toggle — not a separate URL):
+  full CRUD for both libraries. Samples: rename, re-categorize (moves it
+  between the tree's groups), delete, or add a brand-new local file (the
+  *only* place that happens now — see the panel above). Instrument
+  presets: rename, delete, or expand **Edit** to change its saved params/
+  envelope directly, using the same field controls a row's own panel uses.
+  Deleting a sample a saved patch still references doesn't break loading
+  that patch — the row just ends up without a sample instead (see Known
+  limitations).
 - **Sample playback range** (sample rows only, once a sample is loaded): a
-  waveform view under "Load sample…" with two drag handles trims which
-  portion of the buffer actually plays — e.g. picking one hit out of a
-  multi-hit recording, or dropping dead air at the start/end. Applies to
-  both the initial playback position and (in looping trigger modes) the
-  loop points, so a trimmed, looping range only cycles within the
-  selected window rather than looping the whole buffer.
-- **Sample library** (sample rows only): each upload gets tagged with a
-  category (percussion, bass, lead, pad, fx, or other — picked from the
-  "Category (for next upload)" select before hitting "Load sample…"), and
-  every sample ever uploaded — by any row, in any patch — becomes pickable
-  from a row's own "Sample library" dropdown (labeled `category — name`)
-  plus a **Load from library** button, so building a new row doesn't
-  require re-picking a file from disk if something already in the library
-  fits. Loading a local file still works exactly as before; the library is
-  additive, not a replacement. `make seed-samples` populates it with 18
-  procedurally synthesized sounds spanning every category (kick, snare,
-  hats, clap, tom, sub/pluck/growl bass, three lead flavors, two pads, and
-  three fx sweeps) — see `scripts/seed-sample-library.mjs`, a standalone
-  Node script (no browser, no npm deps) that synthesizes raw PCM by hand
-  and uploads it the same way a browser-side "Load sample…" pick would.
+  waveform view with two drag handles trims which portion of the buffer
+  actually plays — e.g. picking one hit out of a multi-hit recording, or
+  dropping dead air at the start/end. Applies to both the initial
+  playback position and (in looping trigger modes) the loop points, so a
+  trimmed, looping range only cycles within the selected window rather
+  than looping the whole buffer.
 - **Per-cell effect chain override** (sample rows only): a cell panel's
   own "Effects" section, same **Override**-button-plus-always-interactive
   pattern as everything else — dial in a cell's chain ahead of time,
@@ -294,10 +307,11 @@ make run-image-backend
 ## Architecture
 
 Two containers: `app` (the Vite frontend, everything described above) and
-`backend` (a small Express + TypeScript service storing patches and
-uploaded samples as plain files — see `backend/src/patchStore.ts` and
-`sampleStore.ts` — no database). The frontend talks to it purely through
-`/api/patches` and `/api/samples`, proxied by Vite in dev
+`backend` (a small Express + TypeScript service storing patches, uploaded
+samples, and instrument presets as plain files — see
+`backend/src/patchStore.ts`, `sampleStore.ts`, `instrumentPresetStore.ts`
+— no database). The frontend talks to it purely through `/api/patches`,
+`/api/samples`, and `/api/instrument-presets`, proxied by Vite in dev
 (`vite.config.ts`) so the browser only ever sees one origin. Modeled
 closely on the sibling project `docker_collab`'s own
 creations-plus-samples backend, with two additions that project's own
@@ -305,22 +319,30 @@ saving doesn't have: name uniqueness (with an overwrite-confirmation
 round trip instead of silently duplicating) and a permanently-protected
 patch name (see `backend/src/routes/patches.ts`).
 
-A locally-picked sample file (via a row's "Load sample…") uploads to the
-backend as a real WAV (encoded client-side — `src/wavEncoder.ts`'s
-`encodeWav`, ported from `docker_collab`'s own frontend, since
-`AudioBuffer` has no native way to export one) the moment it loads, not
-just at save time — so it has a durable id to reference in the patch
-before you've even decided on a name — and, alongside its category (see
-"Sample library" above; free-form on the backend, `src/patchApi.ts`'s
-`SAMPLE_CATEGORIES` is just a curated preset list for the picker UI), is
-immediately listed for every other needsSample row's library dropdown too
-(`GET /api/samples`), not scoped to the row or patch it was uploaded from.
-`src/patch.ts` converts between
-`GridModel`'s live state and the plain-JSON patch shape the backend
-stores (`serializePatch`/`applyPatch`); a small `Map<rowId, sampleId>` in
-`main.ts` tracks which backend sample each row's currently-loaded buffer
-came from, since that's persistence bookkeeping `RowConfig` itself has no
-reason to know about.
+Local file uploads happen only from the Manage Library page now (see
+"Manage Library page" above) — a real WAV (encoded client-side —
+`src/wavEncoder.ts`'s `encodeWav`, ported from `docker_collab`'s own
+frontend, since `AudioBuffer` has no native way to export one), uploaded
+the moment it's added, alongside its category (free-form on the backend;
+`src/patchApi.ts`'s `SAMPLE_CATEGORIES` is just a curated preset list for
+the picker UI). Both the Sample and Instrument Library panels
+(`src/ui/libraryTree.ts`'s `renderLibraryTree`, reused as-is by the
+management page with a fuller per-item `renderItem`) read the *entire*
+library (`GET /api/samples` / `GET /api/instrument-presets`), not scoped
+to the row or patch that created any given item — main.ts's
+`renderLibraryPanels` re-renders both from cache any time the cache or
+the selected row changes (`GridViewHandle.getSelectedRow`/
+`GridViewOptions.onSelectionChange`, since gridView.ts otherwise has no
+reason to know these panels exist at all). `src/patch.ts` converts
+between `GridModel`'s live state and the plain-JSON patch shape the
+backend stores (`serializePatch`/`applyPatch`); a small
+`Map<rowId, sampleId>` in `main.ts` tracks which backend sample each
+row's currently-loaded buffer came from, since that's persistence
+bookkeeping `RowConfig` itself has no reason to know about. Instrument
+presets are a pure library convenience, decoupled from patches entirely —
+applying one just sets a row's `sourceParams`/envelope directly, the same
+fields a saved patch already captures, so there's no preset-id
+back-reference anywhere in the patch schema.
 
 Recording (see "Record" above) reuses the same `encodeWav` but is
 otherwise unrelated to the backend entirely — bruit-kit's own `Recorder`
@@ -338,30 +360,36 @@ src/
   sampleGen.ts           synthesizes a placeholder sample buffer (no binary asset needed)
   wavEncoder.ts           AudioBuffer -> WAV Blob (shared by sample upload and recording)
   patch.ts               GridModel live state <-> plain-JSON patch (serializePatch/applyPatch)
-  patchApi.ts             fetch wrappers for /api/patches + /api/samples
+  patchApi.ts             fetch wrappers for /api/patches + /api/samples + /api/instrument-presets
   grid/
     config.ts             cascade config types + resolveCellConfig (cell > row/column > built-in)
     scale.ts               global key/scale quantizeToScale, applied above the cascade in fireTick
-    sourceFactory.ts       uniform wrapper over bruit-kit's 5 sources/ classes
+    sourceFactory.ts       uniform wrapper over bruit-kit's 5 sources/ classes;
+                            PARAM_FIELDS_BY_SOURCE_TYPE (per-type param metadata,
+                            usable without a live AudioContext -- the preset editor)
     triggerModes.ts        maps trigger-mode choice -> SamplePlayer params + TrackStep.gate
     effectsChain.ts        builds + ref-count-caches persistent effect chains
     gridModel.ts            the sequencer engine: shared clock, per-row/column/cell state, firing logic
   ui/
-    gridView.ts             grid + config panel, selection state, click/right-click wiring
+    gridView.ts             grid + selection config panel, click/right-click wiring
     fields.ts                 form-field renderer shared by every panel kind (no popup)
+    libraryTree.ts             collapsible-by-group list, shared by the main-page
+                                Sample/Instrument panels and the management page
 public/worklets/
   granular-processor.js  copied from bruit-kit/dist/sources/ -- GranularSynth loads
                           this at runtime via a fetched URL, not a bundler import
                           (see bruit-kit's README)
-backend/                 Express + TypeScript patch/sample storage (see "Architecture" above)
+backend/                 Express + TypeScript storage for patches/samples/presets (see "Architecture" above)
   src/
-    server.ts              wires the two routers, ensures patches/ + samples/ exist
+    server.ts              wires the three routers, ensures patches/samples/instrumentPresets exist
     patchStore.ts            one JSON file per patch, keyed by id
     sampleStore.ts           sidecar JSON + binary file per uploaded sample
+    instrumentPresetStore.ts one JSON file per preset, keyed by id
     routes/
       patches.ts              list/get/save, name uniqueness, "demo" protection
-      samples.ts               list/upload (multer)/stream-by-id
-  patches/, samples/        gitignored, created at runtime
+      samples.ts               list/upload (multer)/stream-by-id/rename-recategorize/delete
+      instrumentPresets.ts     list/get/create/update/delete
+  patches/, samples/, instrumentPresets/   gitignored, created at runtime
 tests/
   verify.mjs              manual Playwright golden-path check (make verify)
 scripts/
@@ -404,14 +432,17 @@ arbitrarily reroute per note):
   real constraint of `bruit-kit`'s source classes: a row is one shared,
   polyphonic instance, not a fresh voice reroutable per note (see the
   first limitation above).
-- **No patch delete, and uploaded samples are never deduplicated or
-  cleaned up.** Every "Load sample…" pick uploads a fresh copy to the
-  backend even if the exact same file was already uploaded elsewhere —
-  fine at personal-project scale, not something to rely on for a large
-  sample library (see the roadmap's "sample library" item for where that'd
-  actually get addressed). Deleting a patch isn't wired up anywhere yet
-  either; `backend/patches`/`backend/samples` are plain directories you
-  can always clean up by hand.
+- **No patch delete, and samples are never deduplicated at upload time.**
+  Samples and instrument presets can both be deleted now (Manage Library
+  page), but a patch can't — `backend/patches` is a plain directory you
+  can always clean up by hand. Every local file added to the sample
+  library uploads a fresh copy even if the exact same audio was already
+  there under a different name; nothing merges or flags duplicates.
+- **Deleting a sample a saved patch still references doesn't crash
+  loading that patch, but it does leave the row silent.** `applyPatch`
+  catches the failed fetch and logs a console warning instead of throwing
+  (see `src/patch.ts`'s `addPatchRow`) — there's no reference-counting or
+  "this sample is in use by N patches" warning before you delete it.
 - **Key/Scale quantization is audible-only, never shown in the UI.** A
   row/column "Default note" field or a cell's own note override always
   displays the raw value it's set to, even when a non-Chromatic scale is

@@ -5,22 +5,34 @@ import { getSharedLimiter, unlockAudioContext } from "./audioContext";
 import type { Precedence } from "./grid/config";
 import { GridModel, type Row } from "./grid/gridModel";
 import { KEY_LABELS, SCALE_LABELS, type ScaleType } from "./grid/scale";
-import { SOURCE_TYPE_LABELS, type SourceType } from "./grid/sourceFactory";
+import {
+  PARAM_FIELDS_BY_SOURCE_TYPE,
+  SOURCE_TYPE_LABELS,
+  type SourceType,
+} from "./grid/sourceFactory";
 import { type TempoState, applyPatch, serializePatch } from "./patch";
 import {
+  type InstrumentPreset,
   SAMPLE_CATEGORIES,
   type SampleMetadata,
   SaveConflictError,
+  createInstrumentPreset,
+  deleteInstrumentPreset,
+  deleteSample,
   fetchSampleAudio,
+  listInstrumentPresets,
   listPatches,
   listSamples,
   loadPatch,
   savePatch,
+  updateInstrumentPreset,
+  updateSample,
   uploadSample,
 } from "./patchApi";
 import { generateBlipBuffer } from "./sampleGen";
-import type { Field } from "./ui/fields";
+import { type Field, renderFields } from "./ui/fields";
 import { createGridView, effectsFields } from "./ui/gridView";
+import { type TreeGroup, renderLibraryTree } from "./ui/libraryTree";
 import { encodeWav } from "./wavEncoder";
 
 const DEMO_PATCH_NAME = "demo";
@@ -45,6 +57,26 @@ const playButtonEl = document.querySelector<HTMLButtonElement>("#play-button")!;
 const stopButtonEl = document.querySelector<HTMLButtonElement>("#stop-button")!;
 const masterButtonEl =
   document.querySelector<HTMLButtonElement>("#master-button")!;
+const manageLibraryButtonEl = document.querySelector<HTMLButtonElement>(
+  "#manage-library-button",
+)!;
+const sequencerViewEl =
+  document.querySelector<HTMLDivElement>("#sequencer-view")!;
+const libraryManagementViewEl = document.querySelector<HTMLDivElement>(
+  "#library-management-view",
+)!;
+const sampleLibraryEl =
+  document.querySelector<HTMLDivElement>("#sample-library")!;
+const instrumentLibraryEl = document.querySelector<HTMLDivElement>(
+  "#instrument-library",
+)!;
+const addSampleButtonEl =
+  document.querySelector<HTMLButtonElement>("#add-sample-button")!;
+const sampleManagementEl =
+  document.querySelector<HTMLDivElement>("#sample-management")!;
+const instrumentPresetManagementEl = document.querySelector<HTMLDivElement>(
+  "#instrument-preset-management",
+)!;
 const recordButtonEl =
   document.querySelector<HTMLButtonElement>("#record-button")!;
 const recordStatusEl =
@@ -182,39 +214,356 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
   // buffer came from -- persistence-specific bookkeeping that doesn't
   // belong on RowConfig itself (GridModel stays entirely unaware the
   // backend/patches exist at all), read by serializePatch and populated by
-  // applyPatch and the onSampleLoaded hook below (see patch.ts's doc
-  // comment).
+  // applyPatch and assignSampleToRow below (see patch.ts's doc comment).
   const rowSampleIds = new Map<string, string>();
 
   // Mirrors refreshPatchList's own cache-then-sync-getter shape: gridView.ts
-  // renders synchronously, so it can't await a fetch mid-render -- main.ts
-  // keeps this populated instead and hands back a plain synchronous getter.
+  // and the library panels below render synchronously, so they can't await
+  // a fetch mid-render -- main.ts keeps these populated instead and hands
+  // back plain synchronous getters/closures over them.
   let availableSamples: SampleMetadata[] = [];
   async function refreshAvailableSamples(): Promise<void> {
     availableSamples = await listSamples();
   }
+  let availableInstrumentPresets: InstrumentPreset[] = [];
+  async function refreshInstrumentPresets(): Promise<void> {
+    availableInstrumentPresets = await listInstrumentPresets();
+  }
 
   const view = createGridView(gridEl, model, {
     buildMasterFields,
-    sampleCategories: [...SAMPLE_CATEGORIES],
-    getAvailableSamples: () => availableSamples,
-    getCurrentSampleId: (row) => rowSampleIds.get(row.id),
-    onSampleLoaded: (row, buffer, category) => {
-      uploadSample(buffer, row.config.name, category)
-        .then((meta) => {
-          rowSampleIds.set(row.id, meta.id);
-          return refreshAvailableSamples();
-        })
-        .then(() => view.render())
-        .catch((err) => console.error("Failed to upload sample:", err));
+    getCurrentSampleName: (row) => {
+      const id = rowSampleIds.get(row.id);
+      return availableSamples.find((s) => s.id === id)?.name;
     },
-    onLoadFromLibrary: async (row, sampleId) => {
-      const arrayBuffer = await fetchSampleAudio(sampleId);
-      const buffer = await audioContext.decodeAudioData(arrayBuffer);
-      await model.loadRowSample(row, buffer);
-      rowSampleIds.set(row.id, sampleId);
+    onSaveInstrumentPreset: async (row, name) => {
+      await createInstrumentPreset({
+        name,
+        sourceType: row.config.sourceType,
+        sourceParams: row.source.getParams(),
+        envelope: row.config.envelope,
+      });
+      await refreshInstrumentPresets();
+      renderLibraryPanels();
     },
+    onSelectionChange: () => renderLibraryPanels(),
   });
+
+  // Fetches, decodes, and assigns a library sample onto `row` -- the
+  // Sample Library panel's own click handler (below) is the only caller
+  // now that local file loading no longer exists on this page.
+  async function assignSampleToRow(row: Row, sampleId: string): Promise<void> {
+    const arrayBuffer = await fetchSampleAudio(sampleId);
+    const buffer = await audioContext.decodeAudioData(arrayBuffer);
+    await model.loadRowSample(row, buffer);
+    rowSampleIds.set(row.id, sampleId);
+    view.render();
+    renderLibraryPanels();
+  }
+
+  // Applies a saved instrument preset's sourceType params + envelope onto
+  // `row` -- mirrors exactly what applyPatch's addPatchRow does for the
+  // same two fields when loading a saved patch.
+  function applyPresetToRow(row: Row, preset: InstrumentPreset): void {
+    row.source.setParams(preset.sourceParams);
+    const points = (preset.envelope as { points?: unknown[] } | null)?.points;
+    if (Array.isArray(points)) {
+      model.setRowEnvelope(
+        row,
+        points as Parameters<typeof model.setRowEnvelope>[1],
+      );
+    }
+    view.render();
+  }
+
+  /** Expands into an itemEl to edit a preset's own sourceParams/envelope
+   * directly -- reuses the same per-source-type field metadata
+   * (PARAM_FIELDS_BY_SOURCE_TYPE) rowPanel builds its own param fields
+   * from, and fields.ts's renderFields (the same renderer every other
+   * panel in this app uses), just pointed at a plain draft object instead
+   * of a live row's source. */
+  function renderPresetEditor(
+    preset: InstrumentPreset,
+    itemEl: HTMLElement,
+  ): void {
+    const existing = itemEl.querySelector(".preset-editor");
+    if (existing) {
+      existing.remove();
+      return;
+    }
+
+    const draftParams: Record<string, unknown> = { ...preset.sourceParams };
+    const draftPoints: Array<{ position: number; value: number }> =
+      Array.isArray((preset.envelope as { points?: unknown } | null)?.points)
+        ? [
+            ...(
+              preset.envelope as {
+                points: Array<{ position: number; value: number }>;
+              }
+            ).points,
+          ]
+        : [
+            { position: 0, value: 0 },
+            { position: 1, value: 0 },
+          ];
+
+    const editorEl = document.createElement("div");
+    editorEl.className = "preset-editor";
+
+    const fieldsEl = document.createElement("div");
+    editorEl.appendChild(fieldsEl);
+
+    function renderDraftFields(): void {
+      const paramFields =
+        PARAM_FIELDS_BY_SOURCE_TYPE[preset.sourceType as SourceType] ?? [];
+      const fields: Field[] = paramFields.map((field) => {
+        const current = draftParams[field.key] ?? field.default;
+        if (field.kind === "select") {
+          return {
+            key: field.key,
+            label: field.label,
+            kind: "select",
+            value: String(current),
+            options: field.options ?? [],
+            onChange: (v) => {
+              draftParams[field.key] = v;
+            },
+          };
+        }
+        return {
+          key: field.key,
+          label: field.label,
+          kind: "range",
+          value: Number(current),
+          min: field.min ?? 0,
+          max: field.max ?? 1,
+          step: field.step ?? 0.01,
+          onChange: (v) => {
+            draftParams[field.key] = v;
+          },
+        };
+      });
+      fields.push({
+        key: "envelope",
+        label: "Envelope shape",
+        kind: "automation",
+        points: draftPoints,
+        onChange: (points) => {
+          draftPoints.length = 0;
+          draftPoints.push(...points);
+        },
+      });
+      renderFields(fieldsEl, fields);
+    }
+    renderDraftFields();
+
+    const saveButton = document.createElement("button");
+    saveButton.textContent = "Save changes";
+    saveButton.addEventListener("click", async () => {
+      await updateInstrumentPreset(preset.id, {
+        sourceParams: draftParams,
+        envelope: { points: draftPoints },
+      });
+      await refreshInstrumentPresets();
+      renderManagementPage();
+    });
+    editorEl.appendChild(saveButton);
+
+    itemEl.appendChild(editorEl);
+  }
+
+  // Full CRUD for both libraries -- see the "Manage Library" toggle above.
+  function renderManagementPage(): void {
+    const sampleGroups: TreeGroup<SampleMetadata>[] = SAMPLE_CATEGORIES.map(
+      (category) => ({
+        label: category,
+        items: availableSamples.filter((s) => s.category === category),
+      }),
+    );
+    renderLibraryTree(sampleManagementEl, sampleGroups, {
+      getId: (s) => s.id,
+      emptyMessage: "No samples in the library yet.",
+      renderItem: (sample, itemEl) => {
+        itemEl.classList.add("management-row");
+
+        const nameEl = document.createElement("span");
+        nameEl.className = "name";
+        nameEl.textContent = sample.name;
+        itemEl.appendChild(nameEl);
+
+        const categorySelect = document.createElement("select");
+        for (const category of SAMPLE_CATEGORIES) {
+          const option = document.createElement("option");
+          option.value = category;
+          option.textContent = category;
+          option.selected = category === sample.category;
+          categorySelect.appendChild(option);
+        }
+        categorySelect.addEventListener("change", async () => {
+          await updateSample(sample.id, { category: categorySelect.value });
+          await refreshAvailableSamples();
+          renderManagementPage();
+          renderLibraryPanels();
+        });
+        itemEl.appendChild(categorySelect);
+
+        const renameButton = document.createElement("button");
+        renameButton.textContent = "Rename";
+        renameButton.addEventListener("click", async () => {
+          const name = window.prompt("Rename sample:", sample.name);
+          if (!name?.trim()) return;
+          await updateSample(sample.id, { name: name.trim() });
+          await refreshAvailableSamples();
+          renderManagementPage();
+          renderLibraryPanels();
+        });
+        itemEl.appendChild(renameButton);
+
+        const deleteButton = document.createElement("button");
+        deleteButton.textContent = "Delete";
+        deleteButton.addEventListener("click", async () => {
+          if (
+            !window.confirm(`Delete "${sample.name}"? This can't be undone.`)
+          ) {
+            return;
+          }
+          await deleteSample(sample.id);
+          await refreshAvailableSamples();
+          renderManagementPage();
+          renderLibraryPanels();
+        });
+        itemEl.appendChild(deleteButton);
+      },
+    });
+
+    const presetGroups: TreeGroup<InstrumentPreset>[] = Object.keys(
+      SOURCE_TYPE_LABELS,
+    ).map((sourceType) => ({
+      label: SOURCE_TYPE_LABELS[sourceType as SourceType],
+      items: availableInstrumentPresets.filter(
+        (p) => p.sourceType === sourceType,
+      ),
+    }));
+    renderLibraryTree(instrumentPresetManagementEl, presetGroups, {
+      getId: (p) => p.id,
+      emptyMessage: "No instrument presets saved yet.",
+      renderItem: (preset, itemEl) => {
+        itemEl.classList.add("stacked");
+
+        const summaryRow = document.createElement("div");
+        summaryRow.className = "management-row";
+
+        const nameEl = document.createElement("span");
+        nameEl.className = "name";
+        nameEl.textContent = preset.name;
+        summaryRow.appendChild(nameEl);
+
+        const renameButton = document.createElement("button");
+        renameButton.textContent = "Rename";
+        renameButton.addEventListener("click", async () => {
+          const name = window.prompt("Rename preset:", preset.name);
+          if (!name?.trim()) return;
+          await updateInstrumentPreset(preset.id, { name: name.trim() });
+          await refreshInstrumentPresets();
+          renderManagementPage();
+          renderLibraryPanels();
+        });
+        summaryRow.appendChild(renameButton);
+
+        const editButton = document.createElement("button");
+        editButton.textContent = "Edit";
+        editButton.addEventListener("click", () =>
+          renderPresetEditor(preset, itemEl),
+        );
+        summaryRow.appendChild(editButton);
+
+        const deleteButton = document.createElement("button");
+        deleteButton.textContent = "Delete";
+        deleteButton.addEventListener("click", async () => {
+          if (
+            !window.confirm(`Delete "${preset.name}"? This can't be undone.`)
+          ) {
+            return;
+          }
+          await deleteInstrumentPreset(preset.id);
+          await refreshInstrumentPresets();
+          renderManagementPage();
+          renderLibraryPanels();
+        });
+        summaryRow.appendChild(deleteButton);
+
+        itemEl.appendChild(summaryRow);
+      },
+    });
+  }
+
+  // Rebuilds both main-page library panels from the current caches +
+  // whatever row is currently selected -- called any time either cache or
+  // the selection changes, full rebuild each time (no incremental
+  // diffing anywhere in this app, see gridView.ts's own render()).
+  function renderLibraryPanels(): void {
+    const selectedRow = view.getSelectedRow();
+
+    const sampleGroups: TreeGroup<SampleMetadata>[] = SAMPLE_CATEGORIES.map(
+      (category) => ({
+        label: category,
+        items: availableSamples.filter((s) => s.category === category),
+      }),
+    );
+    renderLibraryTree(sampleLibraryEl, sampleGroups, {
+      getId: (s) => s.id,
+      emptyMessage: "No samples in the library yet.",
+      renderItem: (sample, itemEl) => {
+        const button = document.createElement("button");
+        button.textContent = sample.name;
+        const eligible = selectedRow?.source.needsSample ?? false;
+        if (!eligible) itemEl.classList.add("incompatible");
+        button.addEventListener("click", () => {
+          if (!selectedRow?.source.needsSample) {
+            const hint = document.createElement("p");
+            hint.className = "library-hint";
+            hint.textContent = "Select a sample row first.";
+            sampleLibraryEl.prepend(hint);
+            setTimeout(() => hint.remove(), 2000);
+            return;
+          }
+          assignSampleToRow(selectedRow, sample.id).catch((err) =>
+            console.error("Failed to assign sample:", err),
+          );
+        });
+        itemEl.appendChild(button);
+      },
+    });
+
+    const presetGroups: TreeGroup<InstrumentPreset>[] = Object.keys(
+      SOURCE_TYPE_LABELS,
+    ).map((sourceType) => ({
+      label: SOURCE_TYPE_LABELS[sourceType as SourceType],
+      items: availableInstrumentPresets.filter(
+        (p) => p.sourceType === sourceType,
+      ),
+    }));
+    renderLibraryTree(instrumentLibraryEl, presetGroups, {
+      getId: (p) => p.id,
+      emptyMessage: "No instrument presets saved yet.",
+      renderItem: (preset, itemEl) => {
+        const button = document.createElement("button");
+        button.textContent = preset.name;
+        const matches = selectedRow?.config.sourceType === preset.sourceType;
+        if (!matches) itemEl.classList.add("incompatible");
+        button.addEventListener("click", () => {
+          if (
+            !selectedRow ||
+            selectedRow.config.sourceType !== preset.sourceType
+          ) {
+            return;
+          }
+          applyPresetToRow(selectedRow, preset);
+        });
+        itemEl.appendChild(button);
+      },
+    });
+  }
 
   async function addRow(
     sourceType: SourceType,
@@ -393,7 +742,9 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
   }
   await refreshPatchList();
   await refreshAvailableSamples();
+  await refreshInstrumentPresets();
   view.render();
+  renderLibraryPanels();
 
   addRowButtonEl.addEventListener("click", async () => {
     const sourceType = newRowTypeEl.value as SourceType;
@@ -442,6 +793,7 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
     syncTopBarFromModel();
     patchNameEl.value = patchData.name;
     view.render();
+    renderLibraryPanels();
     patchStatusEl.textContent = "Loaded";
   });
 
@@ -478,6 +830,44 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
   });
 
   masterButtonEl.addEventListener("click", () => view.selectMaster());
+
+  manageLibraryButtonEl.addEventListener("click", () => {
+    const showingManagement =
+      !libraryManagementViewEl.classList.contains("hidden");
+    if (showingManagement) {
+      libraryManagementViewEl.classList.add("hidden");
+      sequencerViewEl.classList.remove("hidden");
+      manageLibraryButtonEl.textContent = "Manage Library";
+    } else {
+      sequencerViewEl.classList.add("hidden");
+      libraryManagementViewEl.classList.remove("hidden");
+      manageLibraryButtonEl.textContent = "Back to Sequencer";
+      renderManagementPage();
+    }
+  });
+
+  // The only place a new local file enters the library now -- everywhere
+  // else on the main page is select-only (see the plan's "split browsing
+  // from administration"). Defaults the new sample to "other"; categorize
+  // it afterward via the same per-row select every sample gets in the
+  // table above.
+  addSampleButtonEl.addEventListener("click", () => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "audio/*";
+    input.addEventListener("change", async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      const name = window.prompt("Name this sample:", file.name) ?? file.name;
+      const arrayBuffer = await file.arrayBuffer();
+      const buffer = await audioContext.decodeAudioData(arrayBuffer);
+      await uploadSample(buffer, name.trim() || file.name, "other");
+      await refreshAvailableSamples();
+      renderManagementPage();
+      renderLibraryPanels();
+    });
+    input.click();
+  });
 
   recordButtonEl.addEventListener("click", async () => {
     if (recorder.isRecording()) {

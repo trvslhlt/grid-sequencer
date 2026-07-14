@@ -83,6 +83,82 @@ function toRowSource<T extends NoteTarget & { output: AudioNode }>(
   };
 }
 
+/** Each source type's own editable params -- pulled out of createRowSource
+ * so the management page's instrument-preset editor can look up a source
+ * type's field definitions (labels/ranges/options) without instantiating
+ * a live RowSource, which needs a real AudioContext and creates real
+ * audio nodes just to read metadata off it. */
+export const PARAM_FIELDS_BY_SOURCE_TYPE: Record<SourceType, ParamField[]> = {
+  samplePlayer: [],
+  oscillatorSynth: [
+    {
+      key: "waveform",
+      label: "Waveform",
+      kind: "select",
+      options: ["sine", "square", "sawtooth", "triangle"],
+      default: "sine",
+    },
+    {
+      key: "detune",
+      label: "Detune (cents)",
+      kind: "range",
+      min: -100,
+      max: 100,
+      step: 1,
+      default: 0,
+    },
+  ],
+  fmSynth: [
+    {
+      key: "harmonicity",
+      label: "Harmonicity",
+      kind: "range",
+      min: 0.5,
+      max: 8,
+      step: 0.1,
+      default: 2,
+    },
+    {
+      key: "modulationIndex",
+      label: "Mod index (Hz)",
+      kind: "range",
+      min: 0,
+      max: 500,
+      step: 5,
+      default: 100,
+    },
+  ],
+  noiseGenerator: [
+    {
+      key: "type",
+      label: "Color",
+      kind: "select",
+      options: ["white", "pink", "brown"],
+      default: "white",
+    },
+  ],
+  granularSynth: [
+    {
+      key: "densityHz",
+      label: "Grain density (Hz)",
+      kind: "range",
+      min: 5,
+      max: 60,
+      step: 1,
+      default: 20,
+    },
+    {
+      key: "pitchJitterCents",
+      label: "Pitch jitter (cents)",
+      kind: "range",
+      min: 0,
+      max: 200,
+      step: 5,
+      default: 0,
+    },
+  ],
+};
+
 export function createRowSource(
   audioContext: AudioContext,
   type: SourceType,
@@ -90,92 +166,46 @@ export function createRowSource(
   switch (type) {
     case "samplePlayer": {
       const player = new SamplePlayer(audioContext);
-      return toRowSource(player, (p) => player.setParams(p), [], {
-        needsSample: true,
-        loadSample: (buffer) => player.loadSample(buffer),
-      });
+      return toRowSource(
+        player,
+        (p) => player.setParams(p),
+        PARAM_FIELDS_BY_SOURCE_TYPE.samplePlayer,
+        {
+          needsSample: true,
+          loadSample: (buffer) => player.loadSample(buffer),
+        },
+      );
     }
     case "oscillatorSynth": {
       const synth = new OscillatorSynth(audioContext);
-      return toRowSource(synth, (p) => synth.setParams(p), [
-        {
-          key: "waveform",
-          label: "Waveform",
-          kind: "select",
-          options: ["sine", "square", "sawtooth", "triangle"],
-          default: "sine",
-        },
-        {
-          key: "detune",
-          label: "Detune (cents)",
-          kind: "range",
-          min: -100,
-          max: 100,
-          step: 1,
-          default: 0,
-        },
-      ]);
+      return toRowSource(
+        synth,
+        (p) => synth.setParams(p),
+        PARAM_FIELDS_BY_SOURCE_TYPE.oscillatorSynth,
+      );
     }
     case "fmSynth": {
       const synth = new FmSynth(audioContext);
-      return toRowSource(synth, (p) => synth.setParams(p), [
-        {
-          key: "harmonicity",
-          label: "Harmonicity",
-          kind: "range",
-          min: 0.5,
-          max: 8,
-          step: 0.1,
-          default: 2,
-        },
-        {
-          key: "modulationIndex",
-          label: "Mod index (Hz)",
-          kind: "range",
-          min: 0,
-          max: 500,
-          step: 5,
-          default: 100,
-        },
-      ]);
+      return toRowSource(
+        synth,
+        (p) => synth.setParams(p),
+        PARAM_FIELDS_BY_SOURCE_TYPE.fmSynth,
+      );
     }
     case "noiseGenerator": {
       const noise = new NoiseGenerator(audioContext);
-      return toRowSource(noise, (p) => noise.setParams(p), [
-        {
-          key: "type",
-          label: "Color",
-          kind: "select",
-          options: ["white", "pink", "brown"],
-          default: "white",
-        },
-      ]);
+      return toRowSource(
+        noise,
+        (p) => noise.setParams(p),
+        PARAM_FIELDS_BY_SOURCE_TYPE.noiseGenerator,
+      );
     }
     case "granularSynth": {
       const synth = new GranularSynth(audioContext);
       return toRowSource(
         synth,
         (p) => synth.setParams(p),
-        [
-          {
-            key: "densityHz",
-            label: "Grain density (Hz)",
-            kind: "range",
-            min: 5,
-            max: 60,
-            step: 1,
-            default: 20,
-          },
-          {
-            key: "pitchJitterCents",
-            label: "Pitch jitter (cents)",
-            kind: "range",
-            min: 0,
-            max: 200,
-            step: 5,
-            default: 0,
-          },
-        ],
+        PARAM_FIELDS_BY_SOURCE_TYPE.granularSynth,
         {
           needsSample: true,
           loadSample: (buffer) => synth.loadSample(buffer),

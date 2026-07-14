@@ -74,6 +74,11 @@ export type Field =
       label: string;
       kind: "text";
       value: string;
+      /** Renders a disabled input instead of an editable one -- for
+       * display-only values (e.g. a row's currently-loaded sample name,
+       * which is set by picking from the sample library, not by typing).
+       * onChange is still required by the type but never called. */
+      readOnly?: boolean;
       onChange: (value: string) => void;
     }
   | { key: string; label: string; kind: "button"; onClick: () => void }
@@ -206,7 +211,10 @@ function renderField(container: HTMLElement, field: Field): void {
     const input = document.createElement("input");
     input.type = "text";
     input.value = field.value;
-    input.addEventListener("change", () => field.onChange(input.value));
+    input.disabled = field.readOnly ?? false;
+    if (!field.readOnly) {
+      input.addEventListener("change", () => field.onChange(input.value));
+    }
     row.appendChild(input);
   } else if (field.kind === "range") {
     if (field.indented) row.classList.add("panel-field-indented");

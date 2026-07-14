@@ -132,10 +132,24 @@ async function addPatchRow(
   row.source.setParams(patchRow.sourceParams);
 
   if (patchRow.sampleId && row.source.needsSample) {
-    const arrayBuffer = await fetchSampleAudio(patchRow.sampleId);
-    const buffer = await audioContext.decodeAudioData(arrayBuffer);
-    await model.loadRowSample(row, buffer);
-    rowSampleIds.set(row.id, patchRow.sampleId);
+    // The referenced sample can be gone by the time this patch is loaded
+    // again -- the library management page now allows deleting any
+    // sample, including ones a saved patch still points at (see README's
+    // Known limitations). That's this row's problem alone: it shouldn't
+    // take the rest of the patch load down with it, so this row just
+    // ends up with no sample loaded instead of the whole applyPatch call
+    // throwing partway through the row list.
+    try {
+      const arrayBuffer = await fetchSampleAudio(patchRow.sampleId);
+      const buffer = await audioContext.decodeAudioData(arrayBuffer);
+      await model.loadRowSample(row, buffer);
+      rowSampleIds.set(row.id, patchRow.sampleId);
+    } catch (err) {
+      console.error(
+        `Row "${row.config.name}"'s sample (${patchRow.sampleId}) couldn't be loaded -- it may have been deleted from the library:`,
+        err,
+      );
+    }
   }
   model.setRowSampleRange(row, patchRow.sampleRange);
 

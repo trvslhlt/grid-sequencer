@@ -4,3 +4,4 @@ dist
 tests/screenshots
 backend/patches
 backend/samples
+backend/instrumentPresets

@@ -2,7 +2,13 @@ import { randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { Router } from "express";
 import multer from "multer";
-import { findSampleFile, listSamples, writeSample } from "../sampleStore.js";
+import {
+  deleteSample,
+  findSampleFile,
+  listSamples,
+  updateSampleMetadata,
+  writeSample,
+} from "../sampleStore.js";
 
 // Only used at upload time, to name the file written to disk -- playback
 // reads the mimeType/filename straight back out of the sidecar, so this
@@ -65,4 +71,29 @@ samplesRouter.post("/", upload.single("audio"), async (req, res) => {
   res
     .status(201)
     .json({ id, name, mimeType: req.file.mimetype, createdAt, category });
+});
+
+samplesRouter.patch("/:id", async (req, res) => {
+  const updated = await updateSampleMetadata(req.params.id, {
+    name: typeof req.body.name === "string" ? req.body.name : undefined,
+    category:
+      typeof req.body.category === "string" ? req.body.category : undefined,
+  });
+  if (!updated) {
+    res.status(404).json({ error: "Sample not found" });
+    return;
+  }
+  res.json(updated);
+});
+
+samplesRouter.delete("/:id", async (req, res) => {
+  const deleted = await deleteSample(req.params.id);
+  if (!deleted) {
+    res.status(404).json({ error: "Sample not found" });
+    return;
+  }
+  // 200 + a body, not 204 -- an empty-body response through Vite's dev
+  // proxy was intermittently reported client-side as net::ERR_ABORTED
+  // even though the delete had already succeeded server-side.
+  res.status(200).json({ deleted: true });
 });

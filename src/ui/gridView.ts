@@ -432,43 +432,32 @@ type Selection =
 
 export interface GridViewOptions {
   buildMasterFields: () => Field[];
-  /** Called right after a row's own "Load sample..." picker finishes
-   * loading a local file -- gridView.ts stays persistence-agnostic (it
-   * doesn't know the backend/patchApi exists at all), so uploading the
-   * buffer to get a durable sampleId for patch-saving is entirely main.ts's
-   * business, wired in through this hook. `category` is whatever the
-   * row's own category picker (see rowPanel) is currently set to. */
-  onSampleLoaded?: (row: Row, buffer: AudioBuffer, category: string) => void;
-  /** The preset category list for the upload-category picker -- a static
-   * UI vocabulary, but injected rather than imported from patchApi.ts to
-   * keep this file from knowing the backend exists at all. Falls back to
-   * a single "other" option if omitted. */
-  sampleCategories?: string[];
-  /** Synchronous read of main.ts's own already-fetched sample list (see
-   * its refreshPatchList-style cache) -- rendering here is fully
-   * synchronous, so this can't be a promise the way the underlying fetch
-   * is. */
-  getAvailableSamples?: () => Array<{
-    id: string;
-    name: string;
-    category: string;
-  }>;
-  /** Loads a previously-uploaded sample from the library onto a row --
-   * main.ts does the fetch+decode+model.loadRowSample+bookkeeping
-   * internally, this hook just triggers it. */
-  onLoadFromLibrary?: (row: Row, sampleId: string) => Promise<void>;
-  /** The backend sample id (see main.ts's rowSampleIds map) the row's
-   * currently-loaded buffer actually came from, if known -- used to
-   * default the "Sample library" select to what's really loaded instead
-   * of an arbitrary first entry, which read as "this is the active
-   * sample" even though it wasn't. */
-  getCurrentSampleId?: (row: Row) => string | undefined;
+  /** Sample assignment now happens entirely through the main-page Sample
+   * Library panel (select a row, click a sample there) -- this file no
+   * longer does any loading/browsing UI itself, just shows what's already
+   * loaded. Synchronous, mirrors getSelectedRow's own "render is sync,
+   * can't await here" reasoning. */
+  getCurrentSampleName?: (row: Row) => string | undefined;
+  /** Row panel's "Save as instrument preset..." button -- prompts for a
+   * name itself (a row-panel-local UI action, same as the old "Load
+   * sample..." button opening its own file picker), then hands the
+   * row's current sourceType/params/envelope to main.ts to persist. */
+  onSaveInstrumentPreset?: (row: Row, name: string) => Promise<void>;
+  /** Fired whenever the selection changes (including to/from null) --
+   * main.ts's own library panels need to know when to re-render their
+   * "does this match the selected row" state, which nothing else here
+   * tells them about. */
+  onSelectionChange?: (row: Row | null) => void;
 }
 
 export interface GridViewHandle {
   render(): void;
   refreshPlayhead(): void;
   selectMaster(): void;
+  /** The currently-selected row, if any -- main.ts's own library panels
+   * (outside this file entirely) need this to know which row a library
+   * click should target. */
+  getSelectedRow(): Row | null;
 }
 
 export function createGridView(
@@ -478,16 +467,16 @@ export function createGridView(
 ): GridViewHandle {
   let selection: Selection = null;
   let cellEls: HTMLDivElement[][] = [];
-  // Keyed by row id rather than held in rowPanel's own locals: rowPanel
-  // reruns from scratch on every render, so anything a user picks ahead of
-  // an action (the category for the *next* upload, which library sample is
-  // currently highlighted) has to live in this outer closure to survive.
-  const pendingUploadCategory = new Map<string, string>();
-  const pendingLibrarySelection = new Map<string, string>();
 
   function select(next: Selection): void {
     selection = next;
     render();
+    options.onSelectionChange?.(getSelectedRow());
+  }
+
+  function getSelectedRow(): Row | null {
+    if (selection?.kind !== "row") return null;
+    return model.getRow(selection.rowId) ?? null;
   }
 
   function rowPanel(row: Row): PanelContent {
@@ -604,86 +593,29 @@ export function createGridView(
     }
 
     if (row.source.needsSample) {
-      const categories = options.sampleCategories ?? ["other"];
-      const uploadCategory = pendingUploadCategory.get(row.id) ?? categories[0];
-
+      // Sample assignment happens via the main-page Sample Library panel
+      // now (select this row, click a sample there) -- this just shows
+      // what's already loaded. See GridViewOptions.getCurrentSampleName.
       fields.push({
-        key: "uploadCategory",
-        label: "Category (for next upload)",
-        kind: "select",
-        value: uploadCategory,
-        options: categories,
-        onChange: (v) => pendingUploadCategory.set(row.id, v),
+        key: "currentSample",
+        label: "Sample",
+        kind: "text",
+        value: options.getCurrentSampleName?.(row) ?? "(none)",
+        readOnly: true,
+        onChange: () => {},
       });
-
-      fields.push({
-        key: "loadSample",
-        label: "Load sample…",
-        kind: "button",
-        onClick: () => {
-          const input = document.createElement("input");
-          input.type = "file";
-          input.accept = "audio/*";
-          input.addEventListener("change", async () => {
-            const file = input.files?.[0];
-            if (!file) return;
-            const audioContext = (row.source.output as AudioNode)
-              .context as AudioContext;
-            const arrayBuffer = await file.arrayBuffer();
-            const buffer = await audioContext.decodeAudioData(arrayBuffer);
-            await model.loadRowSample(row, buffer);
-            options.onSampleLoaded?.(
-              row,
-              buffer,
-              pendingUploadCategory.get(row.id) ?? categories[0],
-            );
-            // The waveform range view below only appears once a buffer
-            // exists -- nothing to trim a range against before then.
-            render();
-          });
-          input.click();
-        },
-      });
-
-      const availableSamples = options.getAvailableSamples?.() ?? [];
-      if (availableSamples.length > 0) {
-        // Defaults to whatever's actually loaded on this row (see
-        // getCurrentSampleId's doc) rather than an arbitrary first entry
-        // -- only falls further back to that when the current sample
-        // isn't known or isn't in the library (e.g. mid-upload).
-        const currentSampleId = options.getCurrentSampleId?.(row);
-        const librarySelection =
-          pendingLibrarySelection.get(row.id) ??
-          (currentSampleId &&
-          availableSamples.some((s) => s.id === currentSampleId)
-            ? currentSampleId
-            : availableSamples[0].id);
-
-        fields.push({
-          key: "librarySample",
-          label: "Sample library",
-          kind: "select",
-          value: librarySelection,
-          options: availableSamples.map((s) => ({
-            value: s.id,
-            label: `${s.category} — ${s.name}`,
-          })),
-          onChange: (v) => pendingLibrarySelection.set(row.id, v),
-        });
-
-        fields.push({
-          key: "loadFromLibrary",
-          label: "Load from library",
-          kind: "button",
-          onClick: async () => {
-            const sampleId =
-              pendingLibrarySelection.get(row.id) ?? librarySelection;
-            await options.onLoadFromLibrary?.(row, sampleId);
-            render();
-          },
-        });
-      }
     }
+
+    fields.push({
+      key: "saveInstrumentPreset",
+      label: "Save as instrument preset…",
+      kind: "button",
+      onClick: () => {
+        const name = window.prompt("Name this instrument preset:");
+        if (!name?.trim()) return;
+        options.onSaveInstrumentPreset?.(row, name.trim());
+      },
+    });
 
     if (row.config.sourceType === "samplePlayer") {
       const buffer = model.getRowSampleBuffer(row);
@@ -1111,7 +1043,12 @@ export function createGridView(
     }
 
     const panel = document.createElement("div");
-    panel.className = "config-panel";
+    // "selection-panel", not just "config-panel" -- the latter is a
+    // shared *styling* class (background/border/padding) the new Sample/
+    // Instrument Library panels also reuse (see index.html), so it alone
+    // no longer uniquely identifies this one dynamic row/column/cell/
+    // master panel.
+    panel.className = "config-panel selection-panel";
     const { title, fields, sections } = panelContent(rows);
 
     const heading = document.createElement("div");
@@ -1193,5 +1130,6 @@ export function createGridView(
     render,
     refreshPlayhead,
     selectMaster: () => select({ kind: "master" }),
+    getSelectedRow,
   };
 }
