@@ -1,6 +1,8 @@
 import express from "express";
+import { ensureEffectChainPresetsDir } from "./effectChainPresetStore.js";
 import { ensureInstrumentPresetsDir } from "./instrumentPresetStore.js";
 import { ensurePatchesDir } from "./patchStore.js";
+import { effectChainPresetsRouter } from "./routes/effectChainPresets.js";
 import { instrumentPresetsRouter } from "./routes/instrumentPresets.js";
 import { patchesRouter } from "./routes/patches.js";
 import { samplesRouter } from "./routes/samples.js";
@@ -13,13 +15,15 @@ app.use(express.json());
 app.use("/api/samples", samplesRouter);
 app.use("/api/patches", patchesRouter);
 app.use("/api/instrument-presets", instrumentPresetsRouter);
+app.use("/api/effect-chain-presets", effectChainPresetsRouter);
 
 async function main() {
-  // patches/, samples/, and instrumentPresets/ are gitignored, so a fresh
-  // checkout won't have them yet.
+  // patches/, samples/, instrumentPresets/, and effectChainPresets/ are
+  // gitignored, so a fresh checkout won't have them yet.
   await ensurePatchesDir();
   await ensureSamplesDir();
   await ensureInstrumentPresetsDir();
+  await ensureEffectChainPresetsDir();
   app.listen(port, () => {
     console.log(`Backend listening on port ${port}`);
   });

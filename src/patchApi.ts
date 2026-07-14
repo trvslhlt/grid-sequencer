@@ -229,3 +229,56 @@ export async function deleteInstrumentPreset(id: string): Promise<void> {
   });
   if (!response.ok) throw new Error(`Failed to delete preset ${id}`);
 }
+
+/** A saved, ordered effect chain -- unlike instrument presets, nothing
+ * ties this to a source type or any other context, since effects apply
+ * uniformly at the row/cell/master level. `effects` stays opaque here,
+ * same reasoning as everywhere else this module never inspects a
+ * cascade-config shape's internals. */
+export interface EffectChainPreset {
+  id: string;
+  name: string;
+  effects: unknown[];
+  createdAt: string;
+}
+
+export async function listEffectChainPresets(): Promise<EffectChainPreset[]> {
+  const response = await fetch("/api/effect-chain-presets");
+  const body: { presets: EffectChainPreset[] } = await response.json();
+  return body.presets;
+}
+
+export async function createEffectChainPreset(preset: {
+  name: string;
+  effects: unknown[];
+}): Promise<EffectChainPreset> {
+  const response = await fetch("/api/effect-chain-presets", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(preset),
+  });
+  if (!response.ok) throw new Error("Failed to save effect chain preset");
+  return response.json();
+}
+
+export async function updateEffectChainPreset(
+  id: string,
+  patch: { name?: string; effects?: unknown[] },
+): Promise<EffectChainPreset> {
+  const response = await fetch(`/api/effect-chain-presets/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  if (!response.ok)
+    throw new Error(`Failed to update effect chain preset ${id}`);
+  return response.json();
+}
+
+export async function deleteEffectChainPreset(id: string): Promise<void> {
+  const response = await fetch(`/api/effect-chain-presets/${id}`, {
+    method: "DELETE",
+  });
+  if (!response.ok)
+    throw new Error(`Failed to delete effect chain preset ${id}`);
+}

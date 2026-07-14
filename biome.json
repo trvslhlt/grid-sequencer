@@ -6,7 +6,8 @@
       "node_modules",
       "backend/patches",
       "backend/samples",
-      "backend/instrumentPresets"
+      "backend/instrumentPresets",
+      "backend/effectChainPresets"
     ]
   },
   "formatter": {

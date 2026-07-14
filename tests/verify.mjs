@@ -10,12 +10,16 @@
 // selected row, instrument presets grey out on a source-type mismatch),
 // the library management page (in-app toggle, not a route -- full CRUD:
 // add/rename/re-categorize/delete a sample, edit/delete an instrument
-// preset), the explicitDuration trigger mode's steps-based duration
-// field, all 6 effect types (filter/distortion/delay/compressor/tremolo/
-// ringMod) and *every* one of each one's own params, including ones added
-// after an "expose all available params" pass (filter gain, compressor
-// knee, tremolo/ring-mod's full non-custom waveform set) -- not just a
-// single headline param each -- FmSynth's and GranularSynth's own
+// preset, rename/edit/delete an effect chain preset), the explicitDuration
+// trigger mode's steps-based duration field, the modular effects chain
+// (no effects at any level -- row/cell/master alike -- by default; add
+// any of the 6 types as needed, including multiple instances of the same
+// type, e.g. two delays) and *every* one of each type's own params,
+// including ones added after an "expose all available params" pass
+// (filter gain, compressor knee, tremolo/ring-mod's full non-custom
+// waveform set), the Effect Library (save a whole configured chain,
+// apply it additively to a different row/cell/master) -- FmSynth's and
+// GranularSynth's own
 // previously-under-exposed params (carrier/modulator waveform; every grain
 // param, not just density/pitch-jitter), the shared reverb bus's own
 // decay/pre-delay/damping (previously hardcoded with no UI at all, now
@@ -65,39 +69,58 @@ function section(page, title) {
     automationSvg() {
       return root.locator(".automation-svg");
     },
-    // An effect's own on/off checkbox (see effectToggle below), scoped to
-    // this section.
-    effectToggle(effectLabel) {
-      return effectToggle(root, effectLabel);
+    // Modular effects chain helpers (see addEffect/removeEffectButton/
+    // effectParam/saveChainPresetButton below), scoped to this section.
+    addEffect(type) {
+      return addEffect(root, type);
     },
-    // One of an effect's own params (see effectParam below), scoped to
-    // this section.
+    removeEffectButton(typeLabel) {
+      return removeEffectButton(root, typeLabel);
+    },
     effectParam(paramLabel) {
       return effectParam(root, paramLabel);
+    },
+    saveChainPresetButton() {
+      return saveChainPresetButton(root);
     },
   };
 }
 
-/** effectsFields (see gridView.ts) renders one checkbox field per effect
- * type -- its label is exactly the effect's name, e.g. "Filter" -- followed
- * by that effect's own params as separate fields, unprefixed (just
- * "Cutoff (Hz)", not "Filter: Cutoff (Hz)": the checkbox row already
- * reads as that group's heading). `hasText` alone would also match a
- * param field whose label happens to *contain* the effect's name, so this
- * needs an *exact* label match to land on the checkbox row specifically. */
-function effectToggle(scope, effectLabel) {
+/** effectsFields (see gridView.ts) renders a chain as a plain ordered
+ * list -- no effects by default at any level (row/cell/master alike):
+ * each already-added instance renders as its own "<Type> — Remove"
+ * button (its own heading, doubling as removal), followed by that
+ * instance's own params, unprefixed (just "Cutoff (Hz)", not "Filter:
+ * Cutoff (Hz)" -- the Remove button already reads as that group's
+ * heading), then a shared "Add effect…" type picker + "Add" button
+ * (appends a fresh default instance -- nothing stops the same type being
+ * added twice) and, once the chain is non-empty, "Save chain as
+ * preset…". */
+function effectAddSelect(scope) {
   return scope
-    .locator(`.panel-field:has(label:text-is("${effectLabel}"))`)
-    .locator("input[type=checkbox]");
+    .locator(".panel-field", { hasText: "Add effect…" })
+    .locator("select");
+}
+function effectAddButton(scope) {
+  return scope.locator("button", { hasText: /^Add$/ });
+}
+async function addEffect(scope, type) {
+  await effectAddSelect(scope).selectOption(type);
+  await effectAddButton(scope).click();
+}
+function removeEffectButton(scope, typeLabel) {
+  return scope.locator("button", { hasText: `${typeLabel} — Remove` });
+}
+function saveChainPresetButton(scope) {
+  return scope.locator("button", { hasText: "Save chain as preset…" });
 }
 
-/** One of an effect's own param fields, by its own (unprefixed) label --
- * a plain range or select field, always interactive regardless of the
- * effect's own checkbox state (see gridView.ts's effectsFields doc for
- * why that's a deliberate unification, not a bug). Every param label is
- * unique app-wide *except* "Wet", which every effect type has -- scope to
- * a specific effect's section, or pick a different param, when that
- * matters. */
+/** One of an effect instance's own param fields, by its own (unprefixed)
+ * label -- always interactive, chain empty or not, override dimmed or
+ * not. Every param label is unique app-wide *except* "Wet" (every effect
+ * type has one) and any label shared by two instances of the *same*
+ * type (e.g. two Delays' "Time (ms)") -- scope narrowly, or pick a
+ * different param, when that matters. */
 function effectParam(scope, paramLabel) {
   return scope.locator(".panel-field", { hasText: paramLabel });
 }
@@ -641,53 +664,102 @@ if ((await durationField.count()) === 0) {
 await triggerModeSelect.selectOption("gatedToStep");
 await page.waitForTimeout(50);
 
-// Row menu should show all 6 effect types and *all* of each one's own
-// params (not just a single headline param each) -- nothing conditionally
+// Row panel's Effects section: no default chain, add each of the 6
+// types one at a time and confirm each one's own full param list appears
+// (not just a single headline param each) -- nothing conditionally
 // appears/disappears as a side effect of *other* fields any more. Param
 // labels are unprefixed (no "Filter: " before "Cutoff (Hz)") -- the
-// checkbox row reads as that group's own heading -- so "Wet" only needs
-// checking once even though every effect has one.
-const menuText = await page.locator(".selection-panel").innerText();
-const expectedEffectLabels = [
-  "Filter",
-  "Filter type",
-  "Cutoff (Hz)",
-  "Resonance (Q)",
-  "Gain (dB",
-  "Wet",
-  "Distortion",
-  "Amount",
-  "Output gain",
-  "Delay",
-  "Time (ms)",
-  "Feedback",
-  "Compressor",
-  "Threshold (dB)",
-  "Knee (dB)",
-  "Ratio",
-  "Attack (ms)",
-  "Release (ms)",
-  "Tremolo",
-  "Rate (Hz)",
-  "Depth",
-  "LFO shape",
-  "Ring Mod",
-  "Frequency (Hz)",
-  "Carrier shape",
-];
-for (const label of expectedEffectLabels) {
-  if (!menuText.includes(label))
-    fail(`row panel missing "${label}" effect control`);
+// "<Type> — Remove" button reads as that instance's own heading -- so
+// "Wet" only needs checking once even though every effect type has one.
+const rowPanel = page.locator(".selection-panel");
+if ((await removeEffectButton(rowPanel, "Filter").count()) !== 0) {
+  fail("a freshly-added row should start with no default effects chain");
+} else {
+  ok("row panel's Effects section starts empty (no default chain)");
 }
-ok("row panel shows every effect type and all of each one's own params");
+
+const EFFECT_PARAM_LABELS = {
+  filter: [
+    "Filter type",
+    "Cutoff (Hz)",
+    "Resonance (Q)",
+    "Gain (dB, shelf/peaking only)",
+    "Wet",
+  ],
+  distortion: ["Amount", "Output gain", "Wet"],
+  delay: ["Time (ms)", "Feedback", "Wet"],
+  compressor: [
+    "Threshold (dB)",
+    "Knee (dB)",
+    "Ratio",
+    "Attack (ms)",
+    "Release (ms)",
+    "Wet",
+  ],
+  tremolo: ["Rate (Hz)", "Depth", "LFO shape", "Wet"],
+  ringMod: ["Frequency (Hz)", "Carrier shape", "Wet"],
+};
+const EFFECT_TYPE_LABELS = {
+  filter: "Filter",
+  distortion: "Distortion",
+  delay: "Delay",
+  compressor: "Compressor",
+  tremolo: "Tremolo",
+  ringMod: "Ring Mod",
+};
+
+for (const [type, typeLabel] of Object.entries(EFFECT_TYPE_LABELS)) {
+  await addEffect(rowPanel, type);
+  await page.waitForTimeout(50);
+  if ((await removeEffectButton(rowPanel, typeLabel).count()) === 0) {
+    fail(`adding "${typeLabel}" did not add a removable instance`);
+  }
+  const panelText = await rowPanel.innerText();
+  for (const label of EFFECT_PARAM_LABELS[type]) {
+    if (!panelText.includes(label)) {
+      fail(`row panel missing "${label}" after adding ${typeLabel}`);
+    }
+  }
+}
+ok(
+  "adding each of the 6 effect types shows that instance's own full param list",
+);
+
+if ((await saveChainPresetButton(rowPanel).count()) === 0) {
+  fail('"Save chain as preset…" should appear once the chain is non-empty');
+} else {
+  ok('"Save chain as preset…" appears once a chain has at least one effect');
+}
+
+// Multiple instances of the same type: add a second Delay, confirm two
+// independent, independently-removable entries, then remove one and
+// confirm exactly one remains.
+await addEffect(rowPanel, "delay");
+await page.waitForTimeout(50);
+if ((await removeEffectButton(rowPanel, "Delay").count()) !== 2) {
+  fail(
+    `expected 2 Delay instances after adding a duplicate, got ${await removeEffectButton(rowPanel, "Delay").count()}`,
+  );
+} else {
+  ok("adding the same effect type twice produces two independent instances");
+}
+await removeEffectButton(rowPanel, "Delay").first().click();
+await page.waitForTimeout(50);
+if ((await removeEffectButton(rowPanel, "Delay").count()) !== 1) {
+  fail("removing one Delay instance should leave exactly one, not zero or two");
+} else {
+  ok(
+    "removing one instance of a duplicated effect type leaves the other untouched",
+  );
+}
 
 // Tremolo/Ring Mod LFO shape widened from sine/square(/sawtooth) to every
 // OscillatorType short of "custom" -- see bruit-kit's TremoloWaveform/
-// RingModulationWaveform.
-const tremoloShapeOptions = await effectParam(page, "LFO shape")
+// RingModulationWaveform. Both are already on the row from the loop above.
+const tremoloShapeOptions = await effectParam(rowPanel, "LFO shape")
   .locator("select option")
   .allTextContents();
-const ringModShapeOptions = await effectParam(page, "Carrier shape")
+const ringModShapeOptions = await effectParam(rowPanel, "Carrier shape")
   .locator("select option")
   .allTextContents();
 if (
@@ -704,6 +776,12 @@ if (
 } else {
   ok("Tremolo and Ring Mod expose every non-custom oscillator waveform");
 }
+
+// Save this 6-effect chain as a library preset -- applied to a different
+// row later, via the main-page Effect Library panel.
+page.once("dialog", (dialog) => dialog.accept("Verify Chain"));
+await saveChainPresetButton(rowPanel).click();
+await page.waitForTimeout(400);
 
 // FmSynth (Bass) and GranularSynth (Pad) previously only exposed a couple
 // of headline params each -- confirm every param bruit-kit's own classes
@@ -746,23 +824,21 @@ await page
   .click({ button: "right" });
 await page.waitForTimeout(50);
 
-const filterToggle = effectToggle(page, "Filter");
-const filterCutoff = effectParam(page, "Cutoff (Hz)");
-const filterCutoffInput = filterCutoff.locator("input[type=range]");
-if (await filterCutoffInput.isDisabled()) {
-  fail("Filter's param controls should always be interactive, checkbox or not");
-} else {
-  ok("effect param controls are interactive before their checkbox is on");
-}
-await filterToggle.click();
-await page.waitForTimeout(50);
+// Filter was added to Kicker back in the "add each of the 6 types" loop
+// above -- reused here rather than adding a fresh one.
+const filterCutoffInput = effectParam(rowPanel, "Cutoff (Hz)").locator(
+  "input[type=range]",
+);
+const filterTypeSelect = effectParam(rowPanel, "Filter type").locator("select");
 
-// Regression: toggling an effect on and then dragging one of its values,
-// with no render in between, used to silently revert the toggle -- the
-// value handler closed over the pre-toggle effects array. Reselecting
-// away and back forces a render from live model state, exposing the bug
-// if it's back.
-const filterTypeSelect = effectParam(page, "Filter type").locator("select");
+// Regression: dragging an effect param's value, with no render() call in
+// the caller wrapping onUpdate, used to leave the change invisible on the
+// next real render -- effectsFields' own onChange calls onUpdate
+// synchronously and getEffects() is read fresh inside every handler
+// specifically to avoid a stale-closure revert, but a caller that forgot
+// its own render() call would still silently drop the change. Reselecting
+// away and back forces a render from live model state, exposing either
+// bug if it's back.
 await filterTypeSelect.selectOption("highpass");
 await filterCutoffInput.evaluate((el) => {
   el.value = "3500";
@@ -777,45 +853,79 @@ await page
   .locator(".row-master", { hasText: "Kicker" })
   .click({ button: "right" });
 await page.waitForTimeout(50);
-if (!(await effectToggle(page, "Filter").isChecked())) {
-  fail("effect toggle+drag reverted the toggle (stale-closure regression)");
+if ((await removeEffectButton(rowPanel, "Filter").count()) === 0) {
+  fail("Filter instance vanished after a reselect (stale-closure regression)");
 }
 if (
-  (await effectParam(page, "Cutoff (Hz)")
+  (await effectParam(rowPanel, "Cutoff (Hz)")
     .locator("input[type=range]")
     .inputValue()) !== "3500"
 ) {
-  fail("effect param value did not persist after toggle+drag");
+  fail("effect param value did not persist after drag + reselect");
 }
 if (
-  (await effectParam(page, "Filter type").locator("select").inputValue()) !==
-  "highpass"
+  (await effectParam(rowPanel, "Filter type")
+    .locator("select")
+    .inputValue()) !== "highpass"
 ) {
-  fail("effect select-kind param value did not persist after toggle+drag");
+  fail("effect select-kind param value did not persist after drag + reselect");
 } else {
-  ok("effect toggle and param values survive a drag with no render in between");
+  ok("effect instances and param values survive a drag across a reselect");
 }
 
-// Regression: enabling Delay used to silence the row entirely, even the
-// dry signal -- effectsChain.ts forced every effect fully wet, and a
+// Regression: Delay used to silence the row entirely, even the dry
+// signal -- effectsChain.ts forced every effect fully wet, and a
 // DelayNode emits nothing until its delay time has elapsed, so a short
 // percussive hit never got heard at all. This can't assert on audio
 // samples from here, but it does confirm the row keeps firing (playhead
-// still advances) and nothing throws with delay active.
-await effectToggle(page, "Delay").click();
-await page.waitForTimeout(50);
+// still advances) with a full 6-effect chain -- including Delay --
+// active, and nothing throws.
 await page.click("#play-button");
 await page.waitForTimeout(600);
-const playheadWithDelay = await page.evaluate(
+const playheadWithEffects = await page.evaluate(
   () => document.querySelectorAll(".cell.playhead").length,
 );
 await page.click("#stop-button");
-if (playheadWithDelay === 0) {
-  fail("playhead stopped advancing with Delay enabled");
+if (playheadWithEffects === 0) {
+  fail(
+    "playhead stopped advancing with a full effects chain (incl. Delay) active",
+  );
 } else if (errors.length > 0) {
-  fail(`errors after enabling Delay:\n${errors.join("\n")}`);
+  fail(`errors with a full effects chain active:\n${errors.join("\n")}`);
 } else {
-  ok("enabling Delay doesn't break playback or throw");
+  ok(
+    "a full multi-effect chain including Delay doesn't break playback or throw",
+  );
+}
+
+// Effect Library panel (main page, third stacked panel): applying a
+// saved chain preset appends its whole ordered list of effects onto
+// whatever's currently selected -- additive, not a replace -- and works
+// on a row with no source-type gating at all, unlike instrument presets.
+await page
+  .locator(".row-master", { hasText: "Synth" })
+  .click({ button: "right" });
+await page.waitForTimeout(50);
+if ((await removeEffectButton(rowPanel, "Filter").count()) !== 0) {
+  fail(
+    "Synth row should start with no effects of its own before applying a preset",
+  );
+}
+await expandGroup("#effect-library", "Effect Chains");
+await page
+  .locator("#effect-library .library-tree-item button", {
+    hasText: "Verify Chain",
+  })
+  .click();
+await page.waitForTimeout(300);
+if ((await removeEffectButton(rowPanel, "Delay").count()) === 0) {
+  fail(
+    "applying a saved effect chain preset should append its effects onto the selected row",
+  );
+} else {
+  ok(
+    "applying an Effect Library preset appends the whole saved chain onto a different row",
+  );
 }
 
 // Global key/scale: a quantization constraint above the note cascade
@@ -833,7 +943,7 @@ if ((await scaleSelect.inputValue()) !== "chromatic") {
 const bassDefaultNote = page
   .locator(".panel-field", { hasText: "Default note" })
   .locator("input[type=number]");
-// Still on the Filter/Delay row from above (Kicker) -- switch to Bass,
+// Still on Synth from the Effect Library test above -- switch to Bass,
 // whose Default note (36) isn't already in C major, to make a real snap
 // possible if this leaked into the displayed value.
 await page
@@ -894,16 +1004,29 @@ if (
 ) {
   fail("cell Effects section should start dimmed (override off)");
 }
+if ((await cellEffects.removeEffectButton("Filter").count()) !== 0) {
+  fail("cell Effects section should start with no default effects chain");
+}
+// Dimming (override off) is purely visual -- confirm the Add-effect
+// control, and then a freshly-added instance's own params, stay
+// interactive throughout.
+if (await effectAddSelect(cellEffects.root).isDisabled()) {
+  fail(
+    "dimmed cell Effects section's Add-effect select should stay interactive, not disabled",
+  );
+}
+await cellEffects.addEffect("filter");
+await page.waitForTimeout(50);
 const cellFilterCutoffInput = cellEffects
   .effectParam("Cutoff (Hz)")
   .locator("input[type=range]");
 if (await cellFilterCutoffInput.isDisabled()) {
   fail("dimmed cell effects controls should stay interactive, not disabled");
 } else {
-  ok("cell Effects section starts dimmed but interactive");
+  ok(
+    "cell Effects section starts empty and dimmed, but its controls stay interactive",
+  );
 }
-await cellEffects.effectToggle("Filter").click();
-await page.waitForTimeout(50);
 await cellFilterCutoffInput.evaluate((el) => {
   el.value = "2200";
   el.dispatchEvent(new Event("input", { bubbles: true }));
@@ -927,10 +1050,8 @@ if (
     "cell Effects section should no longer be dimmed once override is active",
   );
 }
-if (!(await cellEffectsAfter.effectToggle("Filter").isChecked())) {
-  fail(
-    "cell effect checkbox set while dimmed did not survive activating override",
-  );
+if ((await cellEffectsAfter.removeEffectButton("Filter").count()) === 0) {
+  fail("cell effect added while dimmed did not survive activating override");
 }
 const cellFilterCutoffAfter = await cellEffectsAfter
   .effectParam("Cutoff (Hz)")
@@ -999,16 +1120,17 @@ if (columnBefore.includes("off") === columnAfter.includes("off")) {
 }
 await firstColumn.click(); // restore
 
-// Select master -- gain, effect toggles, and limiter controls.
+// Select master -- gain, effects chain, and limiter controls.
 await page.click("#master-button");
 await page.waitForTimeout(50);
 if ((await page.locator(".panel-title").textContent()) !== "Master") {
   fail("master panel title should read exactly 'Master'");
 }
-const masterText = await page.locator(".selection-panel").innerText();
+const masterPanel = page.locator(".selection-panel");
+const masterText = await masterPanel.innerText();
 for (const label of [
   "Gain",
-  "Filter",
+  "Add effect…", // master's Effects fields, spread in directly -- no default chain
   "Limiter ceiling",
   "Limiter release",
   "Reverb decay",
@@ -1018,6 +1140,21 @@ for (const label of [
   if (!masterText.includes(label)) fail(`master panel missing "${label}"`);
 }
 ok("master panel has gain/effects/limiter/reverb controls");
+
+// Master's own effects chain behaves identically to a row's: no default
+// chain, add/remove works the same way.
+if ((await removeEffectButton(masterPanel, "Filter").count()) !== 0) {
+  fail("master panel should start with no default effects chain");
+}
+await addEffect(masterPanel, "filter");
+await page.waitForTimeout(50);
+if ((await removeEffectButton(masterPanel, "Filter").count()) === 0) {
+  fail("adding an effect to the master panel did not add a removable instance");
+} else {
+  ok(
+    "master panel's Effects fields support the same add/remove chain as a row's",
+  );
+}
 
 // The shared reverb bus's own decay/pre-delay/damping used to be
 // hardcoded at construction with no UI at all -- confirm they're both

@@ -80,11 +80,16 @@ Envelope, including the section button's disabled-but-shown-active state
 following the global precedence setting live), dragging an Envelope
 section's breakpoint-curve editor and confirming the shape persists across
 reselection, the explicitDuration trigger mode's steps-based duration
-field, the effect toggles including Compressor (toggling one on and
-dragging its value with no render in between — a stale-closure regression
-that silently reverted the toggle, since fixed), the cell-level Effects
-and Envelope sections and their always-interactive-but-dimmed controls,
-enabling Delay specifically (silenced everything including the dry
+field, the modular effects chain (no effects by default at any level —
+row/cell/master alike; adding each of the 6 types and confirming that
+instance's own full param list appears; adding a duplicate type and
+removing just one instance; dragging a param's value with no render call
+missed in between — a stale-closure regression that used to silently
+drop the change, since fixed), saving a configured chain to the Effect
+Library and applying it additively to a different row (see "Effect
+Library" below), the cell-level Effects and Envelope sections and their
+always-interactive-but-dimmed controls, a full multi-effect chain
+including Delay (Delay used to silence everything including the dry
 signal, since fixed), adding one row of each of the 5 source types
 (GranularSynth exercises its async worklet init), the precedence toggle,
 tempo (BPM/subdivision), resizing the step count, patch persistence
@@ -168,9 +173,14 @@ make run-image-backend
   editable, just dimmed while its button is off, so you can dial in a
   row's or column's values ahead of time and switch them on with one
   click.
-- **Effects** (row, cell, and master — see below): six persistent-chain
-  types, each with **every** param its underlying bruit-kit class
-  actually supports exposed, not a hand-picked subset:
+- **Effects** (row, cell, and master — see below): a modular, ordered
+  chain — **no effects by default** at any level. Add any of the 6 types
+  as needed via the section's own "Add effect…" picker + **Add** button;
+  nothing stops adding the same type twice (e.g. two delays in series,
+  each independently configurable). Each already-added instance renders
+  as its own "**\<Type> — Remove**" button (doubling as that instance's
+  heading) followed by **every** param its underlying bruit-kit class
+  actually supports, not a hand-picked subset:
   - **Filter** — type (lowpass/highpass/bandpass/lowshelf/highshelf/
     peaking/notch/allpass), cutoff, resonance (Q), gain (dB — only
     audible for lowshelf/highshelf/peaking; previously missing from
@@ -184,6 +194,11 @@ make run-image-backend
   - **Ring Mod** — carrier frequency, carrier shape (sine/square/
     sawtooth/triangle), wet.
 
+  Once a chain has at least one effect, **Save chain as preset…** saves
+  the whole ordered list to the **Effect Library** (see below) for reuse
+  elsewhere. Reordering isn't supported yet — effects append to the end
+  of the chain; removing and re-adding is the current way to reorder.
+
   Each source type's own params follow the same rule — see
   `src/grid/sourceFactory.ts`'s `PARAM_FIELDS_BY_SOURCE_TYPE`, which
   mirrors each bruit-kit `sources/` class's full param set (FM synth's
@@ -194,12 +209,10 @@ make run-image-backend
   breakpoint-curve **Envelope** on top of every source (see below) —
   exposing both would let them fight each other.
 
-  Each effect type is one checkbox (is it in the chain at all) followed
-  by all its own params as plain, always-interactive fields — configure
-  them before switching the effect on, same "dial in ahead of time"
-  pattern as Defaults/Envelope, not a per-param disabled-until-checked
-  control the way this used to work. `wet` (dry/wet mix) used to be fixed
-  at instantiation time (1 for every type except delay, which defaults to
+  Every param field is a plain, always-interactive control — configure
+  an instance's params any time, same "dial in ahead of time" philosophy
+  as Defaults/Envelope. `wet` (dry/wet mix) used to be fixed at
+  instantiation time (1 for every type except delay, which defaults to
   0.35 — see the next bullet) and is now user-adjustable like everything
   else.
 - **Row/column precedence** dropdown (top bar): a row or column only
@@ -250,8 +263,8 @@ make run-image-backend
 - **Steps** (top bar): the number of columns, adjustable at any time —
   growing keeps existing columns' data and pads with fresh ones; shrinking
   drops the trailing columns.
-- **Master** panel: master gain, an optional master effects chain (the
-  same 6 effect types as a row's, see above), the limiter's ceiling/
+- **Master** panel: master gain, the same modular effects chain as a
+  row's (see above, no default chain here either), the limiter's ceiling/
   release (the limiter itself is always on — a brickwall safety net
   before the audio device, see `audioContext.ts` — this just exposes its
   two params), and the shared reverb bus's own decay/pre-delay/damping.
@@ -285,15 +298,29 @@ make run-image-backend
   a standalone Node script (no browser, no npm deps) that synthesizes raw
   PCM by hand and uploads it the same way the management page's own
   "+ Add sample" would.
+- **Effect Library panel** (right column, third stacked panel): the same
+  select-only, collapsible-tree shape as the Sample/Instrument panels
+  above, but for whole saved effect chains (see the Effects bullet's
+  "Save chain as preset…"). Unlike an instrument preset, an effect chain
+  preset has no compatibility gating — it applies to a row, a sample
+  cell (auto-enabling that cell's own effects override), or Master alike,
+  since nothing about an effect chain ties it to a source type. Clicking
+  a saved chain **appends** its effects onto whatever's currently
+  selected (additive, not a replace, matching "add effects as needed");
+  with nothing selected, it hints to pick a target first, same as the
+  other two panels.
 - **Manage Library page** (top bar, in-app toggle — not a separate URL):
-  full CRUD for both libraries. Samples: rename, re-categorize (moves it
-  between the tree's groups), delete, or add a brand-new local file (the
-  *only* place that happens now — see the panel above). Instrument
-  presets: rename, delete, or expand **Edit** to change its saved params/
-  envelope directly, using the same field controls a row's own panel uses.
-  Deleting a sample a saved patch still references doesn't break loading
-  that patch — the row just ends up without a sample instead (see Known
-  limitations).
+  full CRUD for all three libraries. Samples: rename, re-categorize
+  (moves it between the tree's groups), delete, or add a brand-new local
+  file (the *only* place that happens now — see the panel above).
+  Instrument presets: rename, delete, or expand **Edit** to change its
+  saved params/envelope directly, using the same field controls a row's
+  own panel uses. Effect chain presets: rename, delete, or expand
+  **Edit** to reach the same add/remove/param controls as a row's own
+  Effects section, against a draft copy — **Save changes** commits it
+  back to the library. Deleting a sample a saved patch still references
+  doesn't break loading that patch — the row just ends up without a
+  sample instead (see Known limitations).
 - **Sample playback range** (sample rows only, once a sample is loaded): a
   waveform view with two drag handles trims which portion of the buffer
   actually plays — e.g. picking one hit out of a multi-hit recording, or
@@ -302,12 +329,13 @@ make run-image-backend
   trimmed, looping range only cycles within the selected window rather
   than looping the whole buffer.
 - **Per-cell effect chain override** (sample rows only): a cell panel's
-  own "Effects" section, same **Override**-button-plus-always-interactive
-  pattern as everything else — dial in a cell's chain ahead of time,
-  switch it on with one click instead of building it from scratch under
-  time pressure. Flipping the button on switches that cell to its own
-  chain (with whatever you'd already set up) instead of inheriting the
-  row's.
+  own "Effects" section, same modular chain as a row's (no default
+  effects, add/remove any number of instances) plus the same
+  **Override**-button-plus-always-interactive pattern as everything
+  else — dial in a cell's chain ahead of time, switch it on with one
+  click instead of building it from scratch under time pressure.
+  Flipping the button on switches that cell to its own chain (with
+  whatever you'd already set up) instead of inheriting the row's.
 - **Patch persistence** (bottom controls, under "Add row"): the whole grid
   — every row/cell/column, master bus, tempo, and any loaded samples —
   saves to and loads from a real backend (see "Architecture" below), not
@@ -325,11 +353,13 @@ make run-image-backend
 
 Two containers: `app` (the Vite frontend, everything described above) and
 `backend` (a small Express + TypeScript service storing patches, uploaded
-samples, and instrument presets as plain files — see
-`backend/src/patchStore.ts`, `sampleStore.ts`, `instrumentPresetStore.ts`
-— no database). The frontend talks to it purely through `/api/patches`,
-`/api/samples`, and `/api/instrument-presets`, proxied by Vite in dev
-(`vite.config.ts`) so the browser only ever sees one origin. Modeled
+samples, instrument presets, and effect chain presets as plain files —
+see `backend/src/patchStore.ts`, `sampleStore.ts`,
+`instrumentPresetStore.ts`, `effectChainPresetStore.ts` — no database).
+The frontend talks to it purely through `/api/patches`, `/api/samples`,
+`/api/instrument-presets`, and `/api/effect-chain-presets`, proxied by
+Vite in dev (`vite.config.ts`) so the browser only ever sees one origin.
+Modeled
 closely on the sibling project `docker_collab`'s own
 creations-plus-samples backend, with two additions that project's own
 saving doesn't have: name uniqueness (with an overwrite-confirmation
@@ -342,24 +372,28 @@ Local file uploads happen only from the Manage Library page now (see
 frontend, since `AudioBuffer` has no native way to export one), uploaded
 the moment it's added, alongside its category (free-form on the backend;
 `src/patchApi.ts`'s `SAMPLE_CATEGORIES` is just a curated preset list for
-the picker UI). Both the Sample and Instrument Library panels
-(`src/ui/libraryTree.ts`'s `renderLibraryTree`, reused as-is by the
-management page with a fuller per-item `renderItem`) read the *entire*
-library (`GET /api/samples` / `GET /api/instrument-presets`), not scoped
-to the row or patch that created any given item — main.ts's
-`renderLibraryPanels` re-renders both from cache any time the cache or
-the selected row changes (`GridViewHandle.getSelectedRow`/
-`GridViewOptions.onSelectionChange`, since gridView.ts otherwise has no
-reason to know these panels exist at all). `src/patch.ts` converts
-between `GridModel`'s live state and the plain-JSON patch shape the
-backend stores (`serializePatch`/`applyPatch`); a small
-`Map<rowId, sampleId>` in `main.ts` tracks which backend sample each
-row's currently-loaded buffer came from, since that's persistence
-bookkeeping `RowConfig` itself has no reason to know about. Instrument
-presets are a pure library convenience, decoupled from patches entirely —
-applying one just sets a row's `sourceParams`/envelope directly, the same
-fields a saved patch already captures, so there's no preset-id
-back-reference anywhere in the patch schema.
+the picker UI). All three library panels (`src/ui/libraryTree.ts`'s
+`renderLibraryTree`, reused as-is by the management page with a fuller
+per-item `renderItem`) read the *entire* library (`GET /api/samples` /
+`GET /api/instrument-presets` / `GET /api/effect-chain-presets`), not
+scoped to the row or patch that created any given item — main.ts's
+`renderLibraryPanels` re-renders all three from cache any time a cache or
+the selection changes (`GridViewHandle.getSelectedRow`/
+`getSelectedEffectsTarget`, `GridViewOptions.onSelectionChange`, since
+gridView.ts otherwise has no reason to know these panels exist at all).
+`getSelectedEffectsTarget` is the broader of the two selection queries —
+it spans row, sample cell, and Master, since (unlike sample/instrument
+presets, row-only and source-type-gated) an effect chain preset applies
+uniformly everywhere. `src/patch.ts` converts between `GridModel`'s live
+state and the plain-JSON patch shape the backend stores
+(`serializePatch`/`applyPatch`); a small `Map<rowId, sampleId>` in
+`main.ts` tracks which backend sample each row's currently-loaded buffer
+came from, since that's persistence bookkeeping `RowConfig` itself has no
+reason to know about. Instrument and effect-chain presets are both pure
+library conveniences, decoupled from patches entirely — applying one just
+sets a row's `sourceParams`/envelope or appends to an effects array
+directly, the same fields/shape a saved patch already captures, so
+there's no preset-id back-reference anywhere in the patch schema.
 
 Recording (see "Record" above) reuses the same `encodeWav` but is
 otherwise unrelated to the backend entirely — bruit-kit's own `Recorder`
@@ -377,7 +411,8 @@ src/
   sampleGen.ts           synthesizes a placeholder sample buffer (no binary asset needed)
   wavEncoder.ts           AudioBuffer -> WAV Blob (shared by sample upload and recording)
   patch.ts               GridModel live state <-> plain-JSON patch (serializePatch/applyPatch)
-  patchApi.ts             fetch wrappers for /api/patches + /api/samples + /api/instrument-presets
+  patchApi.ts             fetch wrappers for /api/patches + /api/samples +
+                            /api/instrument-presets + /api/effect-chain-presets
   grid/
     config.ts             cascade config types + resolveCellConfig (cell > row/column > built-in)
     scale.ts               global key/scale quantizeToScale, applied above the cascade in fireTick
@@ -388,25 +423,30 @@ src/
     effectsChain.ts        builds + ref-count-caches persistent effect chains
     gridModel.ts            the sequencer engine: shared clock, per-row/column/cell state, firing logic
   ui/
-    gridView.ts             grid + selection config panel, click/right-click wiring
+    gridView.ts             grid + selection config panel, click/right-click wiring;
+                              effectsFields (modular add/remove effect chain, shared by
+                              row/cell/master) and getSelectedEffectsTarget
     fields.ts                 form-field renderer shared by every panel kind (no popup)
     libraryTree.ts             collapsible-by-group list, shared by the main-page
-                                Sample/Instrument panels and the management page
+                                Sample/Instrument/Effect panels and the management page
 public/worklets/
   granular-processor.js  copied from bruit-kit/dist/sources/ -- GranularSynth loads
                           this at runtime via a fetched URL, not a bundler import
                           (see bruit-kit's README)
 backend/                 Express + TypeScript storage for patches/samples/presets (see "Architecture" above)
   src/
-    server.ts              wires the three routers, ensures patches/samples/instrumentPresets exist
+    server.ts              wires the four routers, ensures patches/samples/instrumentPresets/
+                              effectChainPresets exist
     patchStore.ts            one JSON file per patch, keyed by id
     sampleStore.ts           sidecar JSON + binary file per uploaded sample
     instrumentPresetStore.ts one JSON file per preset, keyed by id
+    effectChainPresetStore.ts one JSON file per saved effect chain, keyed by id
     routes/
       patches.ts              list/get/save, name uniqueness, "demo" protection
       samples.ts               list/upload (multer)/stream-by-id/rename-recategorize/delete
       instrumentPresets.ts     list/get/create/update/delete
-  patches/, samples/, instrumentPresets/   gitignored, created at runtime
+      effectChainPresets.ts    list/get/create/update/delete
+  patches/, samples/, instrumentPresets/, effectChainPresets/   gitignored, created at runtime
 tests/
   verify.mjs              manual Playwright golden-path check (make verify)
 scripts/

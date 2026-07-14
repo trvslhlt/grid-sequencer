@@ -5,3 +5,4 @@ tests/screenshots
 backend/patches
 backend/samples
 backend/instrumentPresets
+backend/effectChainPresets

@@ -314,67 +314,63 @@ const EFFECT_TABLE: Array<{
   },
 ];
 
-/** One checkbox (is this effect type in the chain at all) followed by
- * *all* of its own params as plain, always-interactive fields -- unlike
- * the old single-param "override" field, there's no one value to pair
- * the checkbox with any more, so params just sit in the panel's normal
- * dimmed-while-off section body (see the callers' `.dimmed-section`
- * wrapping) rather than each disabling itself individually. That's a
- * deliberate unification, not a shortcut: cell-level effects already
- * worked this way (configurable ahead of switching them on), and row/
- * master-level ones now do too.
+// Shared across every effectsFields call (row/cell/master alike) rather
+// than scoped per-chain -- effectsFields is a plain module-level function
+// called fresh from 3 different places, with no closure of its own that
+// would survive across renders the way rowPanel's per-row Maps used to.
+// A single "what to add next" pick leaking between panels is a harmless
+// cosmetic quirk (a freshly-opened panel might show the last-picked type
+// pre-selected instead of the first one) worth accepting for how much
+// simpler it keeps this over threading a unique key through every caller.
+let pendingEffectType: EffectType = EFFECT_TABLE[0].type;
+
+/** A chain is a plain ordered list now, not six fixed on/off slots: each
+ * entry already in `getEffects()` renders as its own removable block (a
+ * "Remove" button doubling as that instance's own heading, same
+ * "no separate label needed" reasoning the old checkbox-as-heading had),
+ * followed by "+ Add effect" (append a fresh default instance of the
+ * chosen type -- nothing stops the same type being added twice, unlike
+ * before) and, once there's anything to save, "Save chain as preset...".
  *
  * `getEffects` is called fresh inside every handler, not just once up
  * front: none of this panel's continuous controls trigger a rebuild on
  * their own "input" events (see fields.ts's top comment for why), so a
- * checkbox toggle followed by a value drag with no render in between
- * would otherwise have the value handler still closing over the
- * pre-toggle array and silently reverting the toggle when it fires. */
+ * remove followed by a value drag with no render in between would
+ * otherwise have the value handler still closing over the pre-removal
+ * array and silently undoing the removal when it fires. */
 export function effectsFields(
   getEffects: () => EffectSpec[],
   onUpdate: (next: EffectSpec[]) => void,
+  onSaveAsPreset?: (effects: EffectSpec[], name: string) => void,
 ): Field[] {
   const effects = getEffects();
   const fields: Field[] = [];
-  for (const effect of EFFECT_TABLE) {
-    const spec = effects.find((e) => e.type === effect.type);
+
+  effects.forEach((spec, index) => {
+    const table = EFFECT_TABLE.find((e) => e.type === spec.type);
+    if (!table) return;
     fields.push({
-      key: effect.type,
-      label: effect.label,
-      kind: "checkbox",
-      value: spec !== undefined,
-      onChange: (on) => {
+      key: `${index}-remove`,
+      label: `${table.label} — Remove`,
+      kind: "button",
+      onClick: () => {
         const current = getEffects();
-        onUpdate(
-          on
-            ? [
-                ...current,
-                {
-                  type: effect.type,
-                  params: Object.fromEntries(
-                    effect.params.map((p) => [p.key, p.default]),
-                  ),
-                },
-              ]
-            : current.filter((e) => e.type !== effect.type),
-        );
+        onUpdate(current.filter((_, i) => i !== index));
       },
     });
-    for (const param of effect.params) {
-      // No "Effect: " prefix -- the checkbox field above already reads as
-      // this group's own heading (see effect.label there), so repeating
+    for (const param of table.params) {
+      // No "Effect: " prefix -- the Remove button above already reads as
+      // this instance's own heading (see table.label there), so repeating
       // the effect's name on every param below it is redundant. Right-
       // aligning the row (see fields.ts's `indented`) is what gives the
       // group its visual separation from the heading instead.
-      const key = `${effect.type}-${param.key}`;
-      const stored = spec?.params[param.key];
+      const key = `${index}-${param.key}`;
+      const stored = spec.params[param.key];
       const onChange = (v: number | string) => {
         const current = getEffects();
         onUpdate(
-          current.map((e) =>
-            e.type === effect.type
-              ? { ...e, params: { ...e.params, [param.key]: v } }
-              : e,
+          current.map((e, i) =>
+            i === index ? { ...e, params: { ...e.params, [param.key]: v } } : e,
           ),
         );
       };
@@ -409,7 +405,51 @@ export function effectsFields(
         });
       }
     }
+  });
+
+  fields.push({
+    key: "add-effect-type",
+    label: "Add effect…",
+    kind: "select",
+    value: pendingEffectType,
+    options: EFFECT_TABLE.map((e) => ({ value: e.type, label: e.label })),
+    onChange: (v) => {
+      pendingEffectType = v as EffectType;
+    },
+  });
+  fields.push({
+    key: "add-effect-button",
+    label: "Add",
+    kind: "button",
+    onClick: () => {
+      const table = EFFECT_TABLE.find((e) => e.type === pendingEffectType);
+      if (!table) return;
+      const current = getEffects();
+      onUpdate([
+        ...current,
+        {
+          type: table.type,
+          params: Object.fromEntries(
+            table.params.map((p) => [p.key, p.default]),
+          ),
+        },
+      ]);
+    },
+  });
+
+  if (effects.length > 0 && onSaveAsPreset) {
+    fields.push({
+      key: "save-chain-preset",
+      label: "Save chain as preset…",
+      kind: "button",
+      onClick: () => {
+        const name = window.prompt("Name this effect chain preset:");
+        if (!name?.trim()) return;
+        onSaveAsPreset(getEffects(), name.trim());
+      },
+    });
   }
+
   return fields;
 }
 
@@ -465,6 +505,16 @@ export interface GridViewOptions {
    * sample..." button opening its own file picker), then hands the
    * row's current sourceType/params/envelope to main.ts to persist. */
   onSaveInstrumentPreset?: (row: Row, name: string) => Promise<void>;
+  /** effectsFields' own "Save chain as preset..." button, for the row
+   * and cell panels' Effects sections -- same reasoning as
+   * onSaveInstrumentPreset, just for a chain instead of a source's
+   * params/envelope. The master panel's own Effects section is built
+   * directly in main.ts, which already has its own save function in
+   * scope with no need for this indirection. */
+  onSaveEffectChainPreset?: (
+    effects: EffectSpec[],
+    name: string,
+  ) => Promise<void>;
   /** Fired whenever the selection changes (including to/from null) --
    * main.ts's own library panels need to know when to re-render their
    * "does this match the selected row" state, which nothing else here
@@ -480,6 +530,17 @@ export interface GridViewHandle {
    * (outside this file entirely) need this to know which row a library
    * click should target. */
   getSelectedRow(): Row | null;
+  /** Read/write access to whatever's currently selected own effects
+   * chain, if it has one -- unlike samples/instrument presets (row-only),
+   * effect chains apply uniformly at row/cell/master, so the Effect
+   * Library panel needs this broader accessor instead of getSelectedRow.
+   * null for a column selection or nothing selected (columns have no
+   * effects chain), and for a cell selection on a non-samplePlayer row
+   * (cell effect overrides only exist for sample rows, see cellPanel). */
+  getSelectedEffectsTarget(): {
+    getEffects: () => EffectSpec[];
+    setEffects: (next: EffectSpec[]) => void;
+  } | null;
 }
 
 export function createGridView(
@@ -499,6 +560,46 @@ export function createGridView(
   function getSelectedRow(): Row | null {
     if (selection?.kind !== "row") return null;
     return model.getRow(selection.rowId) ?? null;
+  }
+
+  function getSelectedEffectsTarget(): {
+    getEffects: () => EffectSpec[];
+    setEffects: (next: EffectSpec[]) => void;
+  } | null {
+    if (selection?.kind === "row") {
+      const row = model.getRow(selection.rowId);
+      if (!row) return null;
+      return {
+        getEffects: () => model.getRow(row.id)?.config.effects ?? [],
+        setEffects: (next) => model.setRowEffects(row, next),
+      };
+    }
+    if (selection?.kind === "cell") {
+      const row = model.getRow(selection.rowId);
+      if (!row || row.config.sourceType !== "samplePlayer") return null;
+      const columnIndex = selection.columnIndex;
+      return {
+        getEffects: () => row.cells[columnIndex]?.effects ?? [],
+        setEffects: (next) => {
+          // Applying a chain preset to a cell whose own override is off
+          // would otherwise change nothing visible -- it'd just sit
+          // unused under the row's own chain until someone remembers to
+          // flip the override separately, which reads as "nothing
+          // happened" from the library panel's own click.
+          model.setCell(row, columnIndex, {
+            effects: next,
+            effectsOverride: true,
+          });
+        },
+      };
+    }
+    if (selection?.kind === "master") {
+      return {
+        getEffects: () => model.getMasterEffects(),
+        setEffects: (next) => model.setMasterEffects(next),
+      };
+    }
+    return null;
   }
 
   function rowPanel(row: Row): PanelContent {
@@ -726,7 +827,16 @@ export function createGridView(
           title: "Effects",
           fields: effectsFields(
             () => model.getRow(row.id)?.config.effects ?? [],
-            (next) => model.setRowEffects(row, next),
+            // Unlike a checkbox/range's own value, adding or removing a
+            // whole effect instance changes *which fields exist at all*
+            // -- fields.ts's controls only echo their own value locally
+            // (see its own top comment), so this needs an explicit
+            // render() to show the new/removed block, not just update it.
+            (next) => {
+              model.setRowEffects(row, next);
+              render();
+            },
+            options.onSaveEffectChainPreset,
           ),
         },
       ],
@@ -948,7 +1058,11 @@ export function createGridView(
         // (main.css's .dimmed-section); it never disables the controls.
         fields: effectsFields(
           () => row.cells[columnIndex].effects,
-          (next) => model.setCell(row, columnIndex, { effects: next }),
+          (next) => {
+            model.setCell(row, columnIndex, { effects: next });
+            render();
+          },
+          options.onSaveEffectChainPreset,
         ),
       });
     }
@@ -1153,5 +1267,6 @@ export function createGridView(
     refreshPlayhead,
     selectMaster: () => select({ kind: "master" }),
     getSelectedRow,
+    getSelectedEffectsTarget,
   };
 }

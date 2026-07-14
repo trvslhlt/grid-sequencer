@@ -2,7 +2,7 @@ import "bruit-kit/ui/automationEditor.css";
 import "bruit-kit/ui/waveformRangeView.css";
 import { Recorder } from "bruit-kit/audio";
 import { getSharedLimiter, unlockAudioContext } from "./audioContext";
-import type { Precedence } from "./grid/config";
+import type { EffectSpec, Precedence } from "./grid/config";
 import { GridModel, type Row } from "./grid/gridModel";
 import { KEY_LABELS, SCALE_LABELS, type ScaleType } from "./grid/scale";
 import {
@@ -12,19 +12,24 @@ import {
 } from "./grid/sourceFactory";
 import { type TempoState, applyPatch, serializePatch } from "./patch";
 import {
+  type EffectChainPreset,
   type InstrumentPreset,
   SAMPLE_CATEGORIES,
   type SampleMetadata,
   SaveConflictError,
+  createEffectChainPreset,
   createInstrumentPreset,
+  deleteEffectChainPreset,
   deleteInstrumentPreset,
   deleteSample,
   fetchSampleAudio,
+  listEffectChainPresets,
   listInstrumentPresets,
   listPatches,
   listSamples,
   loadPatch,
   savePatch,
+  updateEffectChainPreset,
   updateInstrumentPreset,
   updateSample,
   uploadSample,
@@ -70,12 +75,17 @@ const sampleLibraryEl =
 const instrumentLibraryEl = document.querySelector<HTMLDivElement>(
   "#instrument-library",
 )!;
+const effectLibraryEl =
+  document.querySelector<HTMLDivElement>("#effect-library")!;
 const addSampleButtonEl =
   document.querySelector<HTMLButtonElement>("#add-sample-button")!;
 const sampleManagementEl =
   document.querySelector<HTMLDivElement>("#sample-management")!;
 const instrumentPresetManagementEl = document.querySelector<HTMLDivElement>(
   "#instrument-preset-management",
+)!;
+const effectChainPresetManagementEl = document.querySelector<HTMLDivElement>(
+  "#effect-chain-preset-management",
 )!;
 const recordButtonEl =
   document.querySelector<HTMLButtonElement>("#record-button")!;
@@ -187,7 +197,13 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
       },
       ...effectsFields(
         () => model.getMasterEffects(),
-        (next) => model.setMasterEffects(next),
+        // See gridView.ts's own row/cell effectsFields callers for why
+        // this needs an explicit render, not just the model update.
+        (next) => {
+          model.setMasterEffects(next);
+          view.render();
+        },
+        saveEffectChainPreset,
       ),
       {
         key: "limiterCeiling",
@@ -282,6 +298,23 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
   async function refreshInstrumentPresets(): Promise<void> {
     availableInstrumentPresets = await listInstrumentPresets();
   }
+  let availableEffectChainPresets: EffectChainPreset[] = [];
+  async function refreshEffectChainPresets(): Promise<void> {
+    availableEffectChainPresets = await listEffectChainPresets();
+  }
+
+  // Shared by effectsFields' "Save chain as preset..." button wherever
+  // it's called from (row/cell panels via the onSaveEffectChainPreset
+  // hook below, and the master panel directly) -- one save path instead
+  // of three.
+  async function saveEffectChainPreset(
+    effects: EffectSpec[],
+    name: string,
+  ): Promise<void> {
+    await createEffectChainPreset({ name, effects });
+    await refreshEffectChainPresets();
+    renderLibraryPanels();
+  }
 
   const view = createGridView(gridEl, model, {
     buildMasterFields,
@@ -299,6 +332,7 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
       await refreshInstrumentPresets();
       renderLibraryPanels();
     },
+    onSaveEffectChainPreset: saveEffectChainPreset,
     onSelectionChange: () => renderLibraryPanels(),
   });
 
@@ -418,6 +452,60 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
         envelope: { points: draftPoints },
       });
       await refreshInstrumentPresets();
+      renderManagementPage();
+    });
+    editorEl.appendChild(saveButton);
+
+    itemEl.appendChild(editorEl);
+  }
+
+  /** Same shape as renderPresetEditor above, but for a whole effect chain
+   * -- reuses effectsFields directly against a draft array instead of
+   * building a separate editor from scratch, since "add/remove/tweak a
+   * chain" is exactly what effectsFields already does for a live row.
+   * No "Save chain as preset..." button inside it (that's the row
+   * panel's own action, for building a *new* preset) -- editing here
+   * updates this one via its own explicit "Save changes" button. */
+  function renderEffectChainPresetEditor(
+    preset: EffectChainPreset,
+    itemEl: HTMLElement,
+  ): void {
+    const existing = itemEl.querySelector(".preset-editor");
+    if (existing) {
+      existing.remove();
+      return;
+    }
+
+    const draftEffects: EffectSpec[] = (preset.effects as EffectSpec[]).map(
+      (e) => ({ ...e, params: { ...e.params } }),
+    );
+
+    const editorEl = document.createElement("div");
+    editorEl.className = "preset-editor";
+
+    const fieldsEl = document.createElement("div");
+    editorEl.appendChild(fieldsEl);
+
+    function renderDraftFields(): void {
+      renderFields(
+        fieldsEl,
+        effectsFields(
+          () => draftEffects,
+          (next) => {
+            draftEffects.length = 0;
+            draftEffects.push(...next);
+            renderDraftFields();
+          },
+        ),
+      );
+    }
+    renderDraftFields();
+
+    const saveButton = document.createElement("button");
+    saveButton.textContent = "Save changes";
+    saveButton.addEventListener("click", async () => {
+      await updateEffectChainPreset(preset.id, { effects: draftEffects });
+      await refreshEffectChainPresets();
       renderManagementPage();
     });
     editorEl.appendChild(saveButton);
@@ -548,6 +636,62 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
         itemEl.appendChild(summaryRow);
       },
     });
+
+    renderLibraryTree(
+      effectChainPresetManagementEl,
+      [{ label: "Effect Chains", items: availableEffectChainPresets }],
+      {
+        getId: (p) => p.id,
+        emptyMessage: "No effect chain presets saved yet.",
+        renderItem: (preset, itemEl) => {
+          itemEl.classList.add("stacked");
+
+          const summaryRow = document.createElement("div");
+          summaryRow.className = "management-row";
+
+          const nameEl = document.createElement("span");
+          nameEl.className = "name";
+          nameEl.textContent = `${preset.name} (${preset.effects.length})`;
+          summaryRow.appendChild(nameEl);
+
+          const renameButton = document.createElement("button");
+          renameButton.textContent = "Rename";
+          renameButton.addEventListener("click", async () => {
+            const name = window.prompt("Rename effect chain:", preset.name);
+            if (!name?.trim()) return;
+            await updateEffectChainPreset(preset.id, { name: name.trim() });
+            await refreshEffectChainPresets();
+            renderManagementPage();
+            renderLibraryPanels();
+          });
+          summaryRow.appendChild(renameButton);
+
+          const editButton = document.createElement("button");
+          editButton.textContent = "Edit";
+          editButton.addEventListener("click", () =>
+            renderEffectChainPresetEditor(preset, itemEl),
+          );
+          summaryRow.appendChild(editButton);
+
+          const deleteButton = document.createElement("button");
+          deleteButton.textContent = "Delete";
+          deleteButton.addEventListener("click", async () => {
+            if (
+              !window.confirm(`Delete "${preset.name}"? This can't be undone.`)
+            ) {
+              return;
+            }
+            await deleteEffectChainPreset(preset.id);
+            await refreshEffectChainPresets();
+            renderManagementPage();
+            renderLibraryPanels();
+          });
+          summaryRow.appendChild(deleteButton);
+
+          itemEl.appendChild(summaryRow);
+        },
+      },
+    );
   }
 
   // Rebuilds both main-page library panels from the current caches +
@@ -616,6 +760,45 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
         itemEl.appendChild(button);
       },
     });
+
+    // No natural taxonomy for an arbitrary saved chain the way samples
+    // have categories or instrument presets have source types -- a
+    // single flat group, same collapsed-by-default tree shell as the
+    // other two panels regardless.
+    const effectsTarget = view.getSelectedEffectsTarget();
+    renderLibraryTree(
+      effectLibraryEl,
+      [{ label: "Effect Chains", items: availableEffectChainPresets }],
+      {
+        getId: (p) => p.id,
+        emptyMessage: "No effect chain presets saved yet.",
+        renderItem: (preset, itemEl) => {
+          const button = document.createElement("button");
+          button.textContent = `${preset.name} (${preset.effects.length})`;
+          if (!effectsTarget) itemEl.classList.add("incompatible");
+          button.addEventListener("click", () => {
+            const target = view.getSelectedEffectsTarget();
+            if (!target) {
+              const hint = document.createElement("p");
+              hint.className = "library-hint";
+              hint.textContent = "Select a row, sample cell, or Master first.";
+              effectLibraryEl.prepend(hint);
+              setTimeout(() => hint.remove(), 2000);
+              return;
+            }
+            // Additive, not a replace -- "effects as needed," matching
+            // the same append-only philosophy as "+ Add effect" itself.
+            target.setEffects([
+              ...target.getEffects(),
+              ...(preset.effects as EffectSpec[]),
+            ]);
+            view.render();
+            renderLibraryPanels();
+          });
+          itemEl.appendChild(button);
+        },
+      },
+    );
   }
 
   async function addRow(
@@ -807,6 +990,7 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
   await refreshPatchList();
   await refreshAvailableSamples();
   await refreshInstrumentPresets();
+  await refreshEffectChainPresets();
   view.render();
   renderLibraryPanels();
 
