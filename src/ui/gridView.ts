@@ -709,13 +709,6 @@ export function createGridView(
       },
     });
 
-    // The winning side's Defaults/Envelope override is disabled: with
-    // global precedence already deciding this row vs. any column it
-    // shares a field with, an explicit override here can't change the
-    // outcome -- it's the *losing* side that needs one to make its own
-    // values matter at all.
-    const defaultsDisabled = model.precedence === "row";
-
     return {
       title: `Row: ${row.config.name}`,
       fields,
@@ -723,8 +716,7 @@ export function createGridView(
         {
           title: "Defaults",
           toggle: {
-            active: row.config.defaultsOverride || defaultsDisabled,
-            disabled: defaultsDisabled,
+            active: row.config.defaultsOverride,
             onClick: () => {
               model.setRowDefaultsOverride(row, !row.config.defaultsOverride);
               render();
@@ -766,8 +758,7 @@ export function createGridView(
         {
           title: "Envelope",
           toggle: {
-            active: row.config.envelopeOverride || defaultsDisabled,
-            disabled: defaultsDisabled,
+            active: row.config.envelopeOverride,
             onClick: () => {
               model.setRowEnvelopeOverride(row, !row.config.envelopeOverride);
               render();
@@ -790,8 +781,6 @@ export function createGridView(
 
   function columnPanel(columnIndex: number): PanelContent {
     const column = model.columns[columnIndex];
-    const defaultsDisabled = model.precedence === "column";
-
     return {
       title: `Column ${columnIndex + 1}`,
       fields: [
@@ -810,8 +799,7 @@ export function createGridView(
         {
           title: "Defaults",
           toggle: {
-            active: column.defaultsOverride || defaultsDisabled,
-            disabled: defaultsDisabled,
+            active: column.defaultsOverride,
             onClick: () => {
               model.setColumn(columnIndex, {
                 defaultsOverride: !column.defaultsOverride,
@@ -868,8 +856,7 @@ export function createGridView(
         {
           title: "Envelope",
           toggle: {
-            active: column.envelopeOverride || defaultsDisabled,
-            disabled: defaultsDisabled,
+            active: column.envelopeOverride,
             onClick: () => {
               model.setColumn(columnIndex, {
                 envelopeOverride: !column.envelopeOverride,

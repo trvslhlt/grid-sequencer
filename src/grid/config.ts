@@ -159,14 +159,11 @@ function pickEnvelope(
   builtIn: EnvelopeParams,
 ): EnvelopeParams {
   if (cell.envelopeOverride) return cell.envelope;
-  // Whichever side already has global precedence contributes
-  // unconditionally -- see the matching comment in resolveCellConfig.
-  const rowEnv =
-    row.envelopeOverride || precedence === "row" ? row.envelope : undefined;
-  const columnEnv =
-    column.envelopeOverride || precedence === "column"
-      ? column.envelope
-      : undefined;
+  // Only a side with its own override actually on contributes --
+  // precedence just tie-breaks when *both* are on, see the matching
+  // comment in resolveCellConfig.
+  const rowEnv = row.envelopeOverride ? row.envelope : undefined;
+  const columnEnv = column.envelopeOverride ? column.envelope : undefined;
   const primary = precedence === "row" ? rowEnv : columnEnv;
   const secondary = precedence === "row" ? columnEnv : rowEnv;
   return primary ?? secondary ?? builtIn;
@@ -184,41 +181,32 @@ export function resolveCellConfig(
    * module reaching for stepSeconds itself. */
   rowDefaultGate: number,
 ): ResolvedCellConfig {
-  // Whichever side already wins by the global row/column precedence
-  // setting contributes its defaults unconditionally, not just when its
-  // own override flag happens to be on: since it always wins over the
-  // other side whenever both set a value, there's no useful "off" state
-  // for it -- an explicit override is only meaningful for the *losing*
-  // side, which needs one to make its own values matter at all. The UI
-  // reflects this by showing the winning side's Override button as
-  // permanently on (and disabled) rather than possibly appearing "off"
-  // while still secretly winning.
-  const rowHasPrecedence = precedence === "row";
-  const columnHasPrecedence = precedence === "column";
-  const rowDefaultNote =
-    row.defaultsOverride || rowHasPrecedence ? row.defaultNote : undefined;
-  const rowDefaultGain =
-    row.defaultsOverride || rowHasPrecedence ? row.defaultGain : undefined;
-  const rowDefaultShift =
-    row.defaultsOverride || rowHasPrecedence
-      ? row.defaultTimeShiftSeconds
-      : undefined;
-  const columnDefaultNote =
-    column.defaultsOverride || columnHasPrecedence
-      ? column.defaultNote
-      : undefined;
-  const columnDefaultGain =
-    column.defaultsOverride || columnHasPrecedence
-      ? column.defaultGain
-      : undefined;
-  const columnDefaultGate =
-    column.defaultsOverride || columnHasPrecedence
-      ? column.defaultGate
-      : undefined;
-  const columnDefaultShift =
-    column.defaultsOverride || columnHasPrecedence
-      ? column.defaultTimeShiftSeconds
-      : undefined;
+  // A row/column only contributes a field's default when its own
+  // Override is on -- precedence is purely a tie-breaker for when *both*
+  // sides contribute the same field (see pick() below), not a way for
+  // one side to win unconditionally regardless of its own override
+  // state. A row/column that's never touched its defaults (or has
+  // explicitly turned its override off) shouldn't silently block the
+  // other side from taking effect just because it happens to hold global
+  // precedence -- that would make the *other* side's own Override toggle
+  // permanently inert, which is exactly the bug this cascade must avoid.
+  const rowDefaultNote = row.defaultsOverride ? row.defaultNote : undefined;
+  const rowDefaultGain = row.defaultsOverride ? row.defaultGain : undefined;
+  const rowDefaultShift = row.defaultsOverride
+    ? row.defaultTimeShiftSeconds
+    : undefined;
+  const columnDefaultNote = column.defaultsOverride
+    ? column.defaultNote
+    : undefined;
+  const columnDefaultGain = column.defaultsOverride
+    ? column.defaultGain
+    : undefined;
+  const columnDefaultGate = column.defaultsOverride
+    ? column.defaultGate
+    : undefined;
+  const columnDefaultShift = column.defaultsOverride
+    ? column.defaultTimeShiftSeconds
+    : undefined;
 
   return {
     fires: cell.on && row.enabled && column.enabled,

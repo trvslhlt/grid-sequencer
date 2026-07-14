@@ -1,8 +1,9 @@
 // Manual (non-CI) golden-path browser check: unlock audio, toggle cells,
 // select each panel kind (cell/row/column/master) and exercise its
-// override fields and sections (Defaults/Envelope/Effects, including the
-// precedence-aware disabled-but-shown-active state), drag an Envelope
-// section's breakpoint-curve editor and confirm it persists, a sample
+// override fields and sections (Defaults/Envelope/Effects, including that
+// row/column precedence only tie-breaks between two *active* overrides --
+// never lets one side win unconditionally regardless of its own toggle),
+// drag an Envelope section's breakpoint-curve editor and confirm it persists, a sample
 // row's playback range view (drag handles trim which portion of the
 // buffer plays, also persisted), the sample library (category-tagged
 // uploads reusable across every needsSample row, loading from the library
@@ -221,64 +222,89 @@ if ((await page.locator(".panel-title").textContent()) !== "Row: Kick") {
   ok("row panel title identifies the row");
 }
 
-// Defaults/Envelope are consolidated single-toggle sections now (not
-// per-field checkboxes) -- with the default global precedence ("Row
-// wins"), the row's own Defaults/Envelope buttons should be disabled:
-// row already wins whenever both set a value, so an explicit override
-// here can't change anything. They should also show as *active* while
-// disabled, not off -- the winning side always contributes its defaults
-// unconditionally (see resolveCellConfig's doc), so a disabled-but-off
-// button would misrepresent that as "not contributing."
+// Defaults/Envelope are consolidated single-toggle sections -- a row or
+// column only contributes a field's default when its own Override is on;
+// global precedence is purely a tie-breaker for when *both* a row and a
+// column are actively overriding the same field, never a way for one
+// side to win unconditionally regardless of its own toggle state (that
+// was a real bug: it made the *other* side's Override button silently
+// inert). So neither button is ever precedence-disabled.
 const rowDefaults = section(page, "Defaults");
 const rowEnvelope = section(page, "Envelope");
-if (!(await rowDefaults.button.isDisabled())) {
-  fail(
-    "row Defaults button should be disabled while row already has precedence",
-  );
+if (await rowDefaults.button.isDisabled()) {
+  fail("row Defaults button should never be precedence-disabled");
 }
-if (!(await rowEnvelope.button.isDisabled())) {
-  fail(
-    "row Envelope button should be disabled while row already has precedence",
-  );
+if (await rowEnvelope.button.isDisabled()) {
+  fail("row Envelope button should never be precedence-disabled");
+} else {
+  ok("row Defaults/Envelope buttons are never precedence-disabled");
 }
-if (
-  !(await rowDefaults.button.evaluate((el) => el.classList.contains("active")))
-) {
+
+// Regression test for that bug: with the row's own Defaults off (never
+// touched) and the default global precedence ("Row wins"), a column-level
+// override should still actually take effect on a cell in that column --
+// previously the row's raw (untouched) default silently won regardless.
+await page.locator(".column-master").first().click({ button: "right" });
+await page.waitForTimeout(50);
+let columnDefaults = section(page, "Defaults");
+await columnDefaults.button.click();
+await page.waitForTimeout(50);
+const columnNoteProbe = columnDefaults
+  .field("Default note")
+  .locator("input[type=number]");
+await columnNoteProbe.fill("90");
+await columnNoteProbe.dispatchEvent("change");
+await page.waitForTimeout(50);
+await firstCell.click({ button: "right" });
+await page.waitForTimeout(50);
+const cellNoteInput = page
+  .locator(".panel-field", { hasText: "Note" })
+  .locator("input[type=range]");
+if ((await cellNoteInput.inputValue()) !== "90") {
   fail(
-    "row Defaults button should show active while precedence-disabled, not off",
-  );
-}
-if (
-  !(await rowEnvelope.button.evaluate((el) => el.classList.contains("active")))
-) {
-  fail(
-    "row Envelope button should show active while precedence-disabled, not off",
-  );
-}
-if (await rowDefaults.body.evaluate((el) => el.classList.contains("dimmed"))) {
-  fail(
-    "row Defaults section should not be dimmed while precedence-active (even though disabled)",
+    `column-only override should win over an untouched row default: expected note 90, got ${await cellNoteInput.inputValue()}`,
   );
 } else {
   ok(
-    "row Defaults/Envelope buttons disabled but shown active (row already has precedence)",
+    "a column-only override actually takes effect (row has precedence but no override of its own)",
+  );
+}
+// Now also switch the row's own Defaults on with a different value --
+// with row holding global precedence and *both* sides now active,
+// precedence should tie-break in the row's favor.
+await page
+  .locator(".row-master", { hasText: "Kick" })
+  .click({ button: "right" });
+await page.waitForTimeout(50);
+await rowDefaults.button.click();
+await page.waitForTimeout(50);
+const rowNoteProbe = rowDefaults
+  .field("Default note")
+  .locator("input[type=number]");
+await rowNoteProbe.fill("50");
+await rowNoteProbe.dispatchEvent("change");
+await page.waitForTimeout(50);
+await firstCell.click({ button: "right" });
+await page.waitForTimeout(50);
+if ((await cellNoteInput.inputValue()) !== "50") {
+  fail(
+    `with both row and column actively overriding, row's own precedence should win the tie: expected note 50, got ${await cellNoteInput.inputValue()}`,
+  );
+} else {
+  ok(
+    "with both sides actively overriding, global precedence tie-breaks correctly",
   );
 }
 
-// Column doesn't have precedence by default, so its Defaults/Envelope
-// buttons should be enabled -- exercise the full toggle-on, set-value,
-// persist-across-reselection path there instead.
+// Column doesn't have precedence by default -- exercise the full
+// toggle-on, set-value, persist-across-reselection path there too.
 await page.locator(".column-master").first().click({ button: "right" });
 await page.waitForTimeout(50);
-const columnDefaults = section(page, "Defaults");
+columnDefaults = section(page, "Defaults");
 const columnEnvelope = section(page, "Envelope");
 if (await columnDefaults.button.isDisabled()) {
-  fail(
-    "column Defaults button should be enabled by default (row has precedence, not column)",
-  );
+  fail("column Defaults button should never be precedence-disabled");
 }
-await columnDefaults.button.click();
-await page.waitForTimeout(50);
 if (
   !(await columnDefaults.button.evaluate((el) =>
     el.classList.contains("active"),
@@ -351,23 +377,19 @@ if (columnAttackCyAfter !== columnAttackCyBefore) {
   );
 }
 
-// Flip global precedence: the row's buttons should enable (row is now the
-// losing side) and the column's should disable (column now wins).
+// Flip global precedence with both row (note 50) and column (note 72)
+// still actively overriding -- the tie-break winner should flip live,
+// same regression this bug also broke.
 await page.selectOption("#precedence-select", "column");
-await page
-  .locator(".row-master", { hasText: "Kick" })
-  .click({ button: "right" });
+await firstCell.click({ button: "right" });
 await page.waitForTimeout(50);
-if (await section(page, "Defaults").button.isDisabled()) {
-  fail("row Defaults button should enable once column has precedence instead");
-}
-await page.locator(".column-master").first().click({ button: "right" });
-await page.waitForTimeout(50);
-if (!(await section(page, "Defaults").button.isDisabled())) {
-  fail("column Defaults button should disable once column has precedence");
+if ((await cellNoteInput.inputValue()) !== "72") {
+  fail(
+    `flipping precedence to column should flip the tie-break winner: expected note 72, got ${await cellNoteInput.inputValue()}`,
+  );
 } else {
   ok(
-    "Defaults/Envelope disabled state follows the global precedence setting live",
+    "flipping global precedence live-flips the tie-break winner between two active overrides",
   );
 }
 await page.selectOption("#precedence-select", "row"); // restore
