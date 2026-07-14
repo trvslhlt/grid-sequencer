@@ -198,6 +198,7 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
     buildMasterFields,
     sampleCategories: [...SAMPLE_CATEGORIES],
     getAvailableSamples: () => availableSamples,
+    getCurrentSampleId: (row) => rowSampleIds.get(row.id),
     onSampleLoaded: (row, buffer, category) => {
       uploadSample(buffer, row.config.name, category)
         .then((meta) => {

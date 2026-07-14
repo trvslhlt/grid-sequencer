@@ -457,6 +457,12 @@ export interface GridViewOptions {
    * main.ts does the fetch+decode+model.loadRowSample+bookkeeping
    * internally, this hook just triggers it. */
   onLoadFromLibrary?: (row: Row, sampleId: string) => Promise<void>;
+  /** The backend sample id (see main.ts's rowSampleIds map) the row's
+   * currently-loaded buffer actually came from, if known -- used to
+   * default the "Sample library" select to what's really loaded instead
+   * of an arbitrary first entry, which read as "this is the active
+   * sample" even though it wasn't. */
+  getCurrentSampleId?: (row: Row) => string | undefined;
 }
 
 export interface GridViewHandle {
@@ -641,8 +647,17 @@ export function createGridView(
 
       const availableSamples = options.getAvailableSamples?.() ?? [];
       if (availableSamples.length > 0) {
+        // Defaults to whatever's actually loaded on this row (see
+        // getCurrentSampleId's doc) rather than an arbitrary first entry
+        // -- only falls further back to that when the current sample
+        // isn't known or isn't in the library (e.g. mid-upload).
+        const currentSampleId = options.getCurrentSampleId?.(row);
         const librarySelection =
-          pendingLibrarySelection.get(row.id) ?? availableSamples[0].id;
+          pendingLibrarySelection.get(row.id) ??
+          (currentSampleId &&
+          availableSamples.some((s) => s.id === currentSampleId)
+            ? currentSampleId
+            : availableSamples[0].id);
 
         fields.push({
           key: "librarySample",
@@ -662,7 +677,7 @@ export function createGridView(
           kind: "button",
           onClick: async () => {
             const sampleId =
-              pendingLibrarySelection.get(row.id) ?? availableSamples[0].id;
+              pendingLibrarySelection.get(row.id) ?? librarySelection;
             await options.onLoadFromLibrary?.(row, sampleId);
             render();
           },
