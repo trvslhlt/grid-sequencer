@@ -55,6 +55,9 @@ export interface Patch extends PatchSummary {
   masterEffects: unknown[];
   limiterCeiling: number;
   limiterRelease: number;
+  reverbDecaySeconds: number;
+  reverbPreDelayMs: number;
+  reverbDampingHz: number;
   rows: PatchRow[];
 }
 

@@ -85,6 +85,19 @@ const EFFECT_TABLE: Array<{
         step: 0.1,
         default: 0.7,
       },
+      // Only audible for lowshelf/highshelf/peaking -- BiquadFilterNode
+      // ignores it for every other type -- but shown unconditionally like
+      // every other param here (see effectsFields' own doc: nothing
+      // conditionally shows/hides based on another field's value).
+      {
+        key: "gain",
+        label: "Gain (dB, shelf/peaking only)",
+        kind: "range",
+        min: -40,
+        max: 40,
+        step: 1,
+        default: 0,
+      },
       {
         key: "wet",
         label: "Wet",
@@ -180,6 +193,15 @@ const EFFECT_TABLE: Array<{
         default: -24,
       },
       {
+        key: "knee",
+        label: "Knee (dB)",
+        kind: "range",
+        min: 0,
+        max: 40,
+        step: 1,
+        default: 30,
+      },
+      {
         key: "ratio",
         label: "Ratio",
         kind: "range",
@@ -245,7 +267,7 @@ const EFFECT_TABLE: Array<{
         key: "waveform",
         label: "LFO shape",
         kind: "select",
-        options: ["sine", "square"],
+        options: ["sine", "square", "sawtooth", "triangle"],
         default: "sine",
       },
       {
@@ -276,7 +298,7 @@ const EFFECT_TABLE: Array<{
         key: "waveform",
         label: "Carrier shape",
         kind: "select",
-        options: ["sine", "square", "sawtooth"],
+        options: ["sine", "square", "sawtooth", "triangle"],
         default: "sine",
       },
       {

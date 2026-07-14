@@ -169,16 +169,30 @@ make run-image-backend
   row's or column's values ahead of time and switch them on with one
   click.
 - **Effects** (row, cell, and master — see below): six persistent-chain
-  types, each with **all** of its own params exposed, not just one
-  headline knob:
+  types, each with **every** param its underlying bruit-kit class
+  actually supports exposed, not a hand-picked subset:
   - **Filter** — type (lowpass/highpass/bandpass/lowshelf/highshelf/
-    peaking/notch/allpass), cutoff, resonance (Q), wet.
+    peaking/notch/allpass), cutoff, resonance (Q), gain (dB — only
+    audible for lowshelf/highshelf/peaking; previously missing from
+    bruit-kit entirely, which left those three types silently inert),
+    wet.
   - **Distortion** — amount, output gain, wet.
   - **Delay** — time, feedback, wet.
-  - **Compressor** — threshold, ratio, attack, release, wet.
-  - **Tremolo** — rate, depth, LFO shape (sine/square), wet.
+  - **Compressor** — threshold, knee, ratio, attack, release, wet.
+  - **Tremolo** — rate, depth, LFO shape (sine/square/sawtooth/triangle
+    — every non-custom `OscillatorType`), wet.
   - **Ring Mod** — carrier frequency, carrier shape (sine/square/
-    sawtooth), wet.
+    sawtooth/triangle), wet.
+
+  Each source type's own params follow the same rule — see
+  `src/grid/sourceFactory.ts`'s `PARAM_FIELDS_BY_SOURCE_TYPE`, which
+  mirrors each bruit-kit `sources/` class's full param set (FM synth's
+  carrier/modulator waveform, every one of GranularSynth's ~10 grain
+  params) rather than a curated few. The one deliberate exception: each
+  source's own ADSR (attack/decay/sustain/release) is never exposed as a
+  param, since this app already layers a separate, more expressive
+  breakpoint-curve **Envelope** on top of every source (see below) —
+  exposing both would let them fight each other.
 
   Each effect type is one checkbox (is it in the chain at all) followed
   by all its own params as plain, always-interactive fields — configure
@@ -237,10 +251,13 @@ make run-image-backend
   growing keeps existing columns' data and pads with fresh ones; shrinking
   drops the trailing columns.
 - **Master** panel: master gain, an optional master effects chain (the
-  same 6 effect types as a row's, see above), and the limiter's ceiling/
-  release — the limiter itself is always on (a brickwall safety net
-  before the audio device, see `audioContext.ts`), this just exposes its
-  two params.
+  same 6 effect types as a row's, see above), the limiter's ceiling/
+  release (the limiter itself is always on — a brickwall safety net
+  before the audio device, see `audioContext.ts` — this just exposes its
+  two params), and the shared reverb bus's own decay/pre-delay/damping.
+  The reverb bus is a parallel send (every row's own "Reverb send" field
+  controls how much of that row reaches it at all), always fully wet, so
+  only its character is exposed here, not a redundant wet control.
 - **Add row**: pick a source type (sample player, oscillator, FM, noise,
   or granular synth) and a name, then **Add row**. Granular-synth rows
   take a moment to initialize (loads an `AudioWorklet`). Source type is

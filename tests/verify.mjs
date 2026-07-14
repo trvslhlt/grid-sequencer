@@ -12,15 +12,21 @@
 // add/rename/re-categorize/delete a sample, edit/delete an instrument
 // preset), the explicitDuration trigger mode's steps-based duration
 // field, all 6 effect types (filter/distortion/delay/compressor/tremolo/
-// ringMod) and every one of each one's own params -- not just a single
-// headline param each -- add one of each of the 5 source types
-// (GranularSynth exercises its async worklet init), flip row/column
-// precedence, tempo, step count, and the global key/scale (playback keeps
-// working, note fields stay untouched by the silent snap), patch
-// persistence (save under a name, reload the page for a genuinely fresh
-// context, confirm "demo" loads by default and the saved patch
-// round-trips through the real backend), recording audio out to a real
-// WAV download, and play -- all with zero console errors.
+// ringMod) and *every* one of each one's own params, including ones added
+// after an "expose all available params" pass (filter gain, compressor
+// knee, tremolo/ring-mod's full non-custom waveform set) -- not just a
+// single headline param each -- FmSynth's and GranularSynth's own
+// previously-under-exposed params (carrier/modulator waveform; every grain
+// param, not just density/pitch-jitter), the shared reverb bus's own
+// decay/pre-delay/damping (previously hardcoded with no UI at all, now
+// live-adjustable and persisted through patches), add one of each of the
+// 5 source types (GranularSynth exercises its async worklet init), flip
+// row/column precedence, tempo, step count, and the global key/scale
+// (playback keeps working, note fields stay untouched by the silent
+// snap), patch persistence (save under a name, reload the page for a
+// genuinely fresh context, confirm "demo" loads by default and the saved
+// patch round-trips through the real backend), recording audio out to a
+// real WAV download, and play -- all with zero console errors.
 import { readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -174,6 +180,13 @@ await page.waitForSelector("#app:not(.hidden)");
 // seeding/loading happens after that, via the backend (see main.ts), so
 // the grid itself isn't populated yet until a row actually appears.
 await page.waitForSelector(".row-master");
+// A short settle beyond the first row appearing -- render() now does
+// noticeably more synchronous work per call than it used to (many more
+// per-source param fields, plus the two new library trees rebuilding on
+// every selection change), and the JS engine hasn't warmed up on this
+// page's own render path yet this early, so the very first few
+// interactions below were intermittently racing ahead of it.
+await page.waitForTimeout(300);
 
 const rowCount = await page.locator(".row-master").count();
 if (rowCount !== 5) fail(`expected 5 starter rows, found ${rowCount}`);
@@ -202,8 +215,14 @@ if (before.includes("on") === after.includes("on")) {
 }
 
 // Select the cell (right-click) -- panel shows its fields, grid marks it.
+// waitForSelector, not a fixed timeout -- render() now does noticeably
+// more synchronous work per call than it used to (many more per-source
+// param fields, plus the two library trees rebuilding on every selection
+// change), and this file's early checks run before the JS engine has
+// warmed up on this page's own render path, so a fixed 50ms buffer that
+// used to be comfortable started intermittently losing the race here.
 await firstCell.click({ button: "right" });
-await page.waitForTimeout(50);
+await page.waitForSelector(".cell.selected", { timeout: 2000 });
 if (!(await firstCell.evaluate((el) => el.classList.contains("selected")))) {
   fail("selecting a cell did not mark it .selected in the grid");
 } else {
@@ -634,6 +653,7 @@ const expectedEffectLabels = [
   "Filter type",
   "Cutoff (Hz)",
   "Resonance (Q)",
+  "Gain (dB",
   "Wet",
   "Distortion",
   "Amount",
@@ -643,6 +663,7 @@ const expectedEffectLabels = [
   "Feedback",
   "Compressor",
   "Threshold (dB)",
+  "Knee (dB)",
   "Ratio",
   "Attack (ms)",
   "Release (ms)",
@@ -659,6 +680,71 @@ for (const label of expectedEffectLabels) {
     fail(`row panel missing "${label}" effect control`);
 }
 ok("row panel shows every effect type and all of each one's own params");
+
+// Tremolo/Ring Mod LFO shape widened from sine/square(/sawtooth) to every
+// OscillatorType short of "custom" -- see bruit-kit's TremoloWaveform/
+// RingModulationWaveform.
+const tremoloShapeOptions = await effectParam(page, "LFO shape")
+  .locator("select option")
+  .allTextContents();
+const ringModShapeOptions = await effectParam(page, "Carrier shape")
+  .locator("select option")
+  .allTextContents();
+if (
+  !["sine", "square", "sawtooth", "triangle"].every((w) =>
+    tremoloShapeOptions.includes(w),
+  ) ||
+  !["sine", "square", "sawtooth", "triangle"].every((w) =>
+    ringModShapeOptions.includes(w),
+  )
+) {
+  fail(
+    `Tremolo/Ring Mod waveform options should include sine/square/sawtooth/triangle, got ${tremoloShapeOptions} / ${ringModShapeOptions}`,
+  );
+} else {
+  ok("Tremolo and Ring Mod expose every non-custom oscillator waveform");
+}
+
+// FmSynth (Bass) and GranularSynth (Pad) previously only exposed a couple
+// of headline params each -- confirm every param bruit-kit's own classes
+// support is now wired up (see sourceFactory.ts's PARAM_FIELDS_BY_SOURCE_TYPE).
+await page
+  .locator(".row-master", { hasText: "Bass" })
+  .click({ button: "right" });
+await page.waitForTimeout(50);
+for (const label of ["Carrier waveform", "Modulator waveform"]) {
+  if ((await page.locator(".panel-field", { hasText: label }).count()) === 0) {
+    fail(`FmSynth row panel missing "${label}"`);
+  }
+}
+ok("FmSynth row panel exposes carrier/modulator waveform");
+
+await page
+  .locator(".row-master", { hasText: "Pad" })
+  .click({ button: "right" });
+await page.waitForTimeout(50);
+for (const label of [
+  "Grain duration min",
+  "Grain duration max",
+  "Grain duration mode",
+  "Position jitter",
+  "Pan spread",
+  "Scan speed",
+  "Playhead mode",
+  "Direct-play pitch",
+]) {
+  if ((await page.locator(".panel-field", { hasText: label }).count()) === 0) {
+    fail(`GranularSynth row panel missing "${label}"`);
+  }
+}
+ok(
+  "GranularSynth row panel exposes every grain param, not just density/pitch jitter",
+);
+
+await page
+  .locator(".row-master", { hasText: "Kicker" })
+  .click({ button: "right" });
+await page.waitForTimeout(50);
 
 const filterToggle = effectToggle(page, "Filter");
 const filterCutoff = effectParam(page, "Cutoff (Hz)");
@@ -920,10 +1006,31 @@ if ((await page.locator(".panel-title").textContent()) !== "Master") {
   fail("master panel title should read exactly 'Master'");
 }
 const masterText = await page.locator(".selection-panel").innerText();
-for (const label of ["Gain", "Filter", "Limiter ceiling", "Limiter release"]) {
+for (const label of [
+  "Gain",
+  "Filter",
+  "Limiter ceiling",
+  "Limiter release",
+  "Reverb decay",
+  "Reverb pre-delay",
+  "Reverb damping",
+]) {
   if (!masterText.includes(label)) fail(`master panel missing "${label}"`);
 }
-ok("master panel has gain/effects/limiter controls");
+ok("master panel has gain/effects/limiter/reverb controls");
+
+// The shared reverb bus's own decay/pre-delay/damping used to be
+// hardcoded at construction with no UI at all -- confirm they're both
+// live-adjustable and actually persist through a patch save/reload,
+// same as every other master-level setting already does.
+const reverbDecayInput = page
+  .locator(".panel-field", { hasText: "Reverb decay" })
+  .locator("input[type=range]");
+await reverbDecayInput.evaluate((el) => {
+  el.value = "5.5";
+  el.dispatchEvent(new Event("input", { bubbles: true }));
+});
+await page.waitForTimeout(50);
 
 // Precedence, tempo, and step count controls.
 await page.selectOption("#precedence-select", "column");
@@ -1017,6 +1124,19 @@ if (
 } else {
   ok("fresh reload's demo resets key/scale to the default (Chromatic/C)");
 }
+await page.click("#master-button");
+await page.waitForTimeout(50);
+const demoReverbDecay = await page
+  .locator(".panel-field", { hasText: "Reverb decay" })
+  .locator("input[type=range]")
+  .inputValue();
+if (demoReverbDecay !== "2.2") {
+  fail(
+    `demo should load with the default 2.2s reverb decay, unaffected by this run's 5.5s change, got ${demoReverbDecay}`,
+  );
+} else {
+  ok("fresh reload's demo resets reverb decay to the default (2.2s)");
+}
 
 const patchOptionValue = await page
   .locator("#patch-select option", { hasText: TEST_PATCH_NAME })
@@ -1044,6 +1164,19 @@ if (!patchOptionValue) {
     fail("loaded patch should restore the D major key/scale it was saved with");
   } else {
     ok("saved patch round-trips its key/scale through the backend");
+  }
+  await page.click("#master-button");
+  await page.waitForTimeout(50);
+  const loadedReverbDecay = await page
+    .locator(".panel-field", { hasText: "Reverb decay" })
+    .locator("input[type=range]")
+    .inputValue();
+  if (loadedReverbDecay !== "5.5") {
+    fail(
+      `loaded patch should restore the 5.5s reverb decay it was saved with, got ${loadedReverbDecay}`,
+    );
+  } else {
+    ok("saved patch round-trips its reverb decay through the backend");
   }
 }
 

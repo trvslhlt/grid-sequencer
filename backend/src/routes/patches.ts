@@ -91,6 +91,9 @@ patchesRouter.post("/", async (req, res) => {
     masterEffects: body.masterEffects ?? [],
     limiterCeiling: body.limiterCeiling ?? -1,
     limiterRelease: body.limiterRelease ?? 0.1,
+    reverbDecaySeconds: body.reverbDecaySeconds ?? 2.2,
+    reverbPreDelayMs: body.reverbPreDelayMs ?? 20,
+    reverbDampingHz: body.reverbDampingHz ?? 6000,
     rows: body.rows as PatchRow[],
   };
 

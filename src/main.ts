@@ -164,6 +164,14 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
   // rebuilds rather than resetting the sliders to a hardcoded default.
   let limiterCeiling = -1;
   let limiterRelease = 0.1;
+  // Same reasoning, for the shared reverb bus -- ReverbEffect has no
+  // getter either. Matches model.reverb's own construction call
+  // (`setParams({ wet: 1, decaySeconds: 2.2 })`) plus ReverbEffect's own
+  // constructor defaults for preDelay/damping (never set explicitly at
+  // construction, so they start at the class's own 20ms/6000Hz).
+  let reverbDecaySeconds = 2.2;
+  let reverbPreDelayMs = 20;
+  let reverbDampingHz = 6000;
 
   function buildMasterFields(): Field[] {
     return [
@@ -205,6 +213,51 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
         onChange: (v) => {
           limiterRelease = v;
           limiter.setParams({ release: v });
+        },
+      },
+      // The shared reverb bus's own character -- distinct from a row's
+      // "Reverb send" (how much of that row reaches this bus at all).
+      // wet isn't exposed here: model.reverb is a parallel send bus, not
+      // an insert, so it's always fully wet (see gridModel.ts's own
+      // construction call) -- exposing wet here too would just duplicate
+      // what each row's send level already controls, more confusingly.
+      {
+        key: "reverbDecaySeconds",
+        label: "Reverb decay (s)",
+        kind: "range",
+        value: reverbDecaySeconds,
+        min: 0.1,
+        max: 8,
+        step: 0.1,
+        onChange: (v) => {
+          reverbDecaySeconds = v;
+          model.reverb.setParams({ decaySeconds: v });
+        },
+      },
+      {
+        key: "reverbPreDelayMs",
+        label: "Reverb pre-delay (ms)",
+        kind: "range",
+        value: reverbPreDelayMs,
+        min: 0,
+        max: 200,
+        step: 1,
+        onChange: (v) => {
+          reverbPreDelayMs = v;
+          model.reverb.setParams({ preDelayMs: v });
+        },
+      },
+      {
+        key: "reverbDampingHz",
+        label: "Reverb damping (Hz)",
+        kind: "range",
+        value: reverbDampingHz,
+        min: 500,
+        max: 12000,
+        step: 100,
+        onChange: (v) => {
+          reverbDampingHz = v;
+          model.reverb.setParams({ dampingHz: v });
         },
       },
     ];
@@ -591,6 +644,9 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
       subdivision: Number(subdivisionEl.value),
       limiterCeiling,
       limiterRelease,
+      reverbDecaySeconds,
+      reverbPreDelayMs,
+      reverbDampingHz,
     };
   }
 
@@ -600,6 +656,14 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
     limiterCeiling = state.limiterCeiling;
     limiterRelease = state.limiterRelease;
     limiter.setParams({ ceiling: limiterCeiling, release: limiterRelease });
+    reverbDecaySeconds = state.reverbDecaySeconds;
+    reverbPreDelayMs = state.reverbPreDelayMs;
+    reverbDampingHz = state.reverbDampingHz;
+    model.reverb.setParams({
+      decaySeconds: reverbDecaySeconds,
+      preDelayMs: reverbPreDelayMs,
+      dampingHz: reverbDampingHz,
+    });
     model.setStepSeconds(computeStepSeconds());
   }
 

@@ -110,6 +110,20 @@ export const PARAM_FIELDS_BY_SOURCE_TYPE: Record<SourceType, ParamField[]> = {
   ],
   fmSynth: [
     {
+      key: "carrierWaveform",
+      label: "Carrier waveform",
+      kind: "select",
+      options: ["sine", "square", "sawtooth", "triangle"],
+      default: "sine",
+    },
+    {
+      key: "modulatorWaveform",
+      label: "Modulator waveform",
+      kind: "select",
+      options: ["sine", "square", "sawtooth", "triangle"],
+      default: "sine",
+    },
+    {
       key: "harmonicity",
       label: "Harmonicity",
       kind: "range",
@@ -137,7 +151,37 @@ export const PARAM_FIELDS_BY_SOURCE_TYPE: Record<SourceType, ParamField[]> = {
       default: "white",
     },
   ],
+  // Defaults below match granular-processor.js's own worklet-side defaults
+  // (not just whatever seemed reasonable) -- a brand-new row never calls
+  // setParams until a field is actually touched, so the UI's declared
+  // default and the worklet's actual starting value need to agree, or the
+  // slider shows a value that isn't what's really playing yet.
   granularSynth: [
+    {
+      key: "grainDurationMinMs",
+      label: "Grain duration min (ms)",
+      kind: "range",
+      min: 5,
+      max: 200,
+      step: 1,
+      default: 40,
+    },
+    {
+      key: "grainDurationMaxMs",
+      label: "Grain duration max (ms)",
+      kind: "range",
+      min: 5,
+      max: 500,
+      step: 1,
+      default: 80,
+    },
+    {
+      key: "grainDurationMode",
+      label: "Grain duration mode",
+      kind: "select",
+      options: ["random", "envelope"],
+      default: "random",
+    },
     {
       key: "densityHz",
       label: "Grain density (Hz)",
@@ -148,12 +192,55 @@ export const PARAM_FIELDS_BY_SOURCE_TYPE: Record<SourceType, ParamField[]> = {
       default: 20,
     },
     {
+      key: "positionJitterMs",
+      label: "Position jitter (ms)",
+      kind: "range",
+      min: 0,
+      max: 200,
+      step: 1,
+      default: 30,
+    },
+    {
       key: "pitchJitterCents",
       label: "Pitch jitter (cents)",
       kind: "range",
       min: 0,
       max: 200,
       step: 5,
+      default: 10,
+    },
+    {
+      key: "panSpread",
+      label: "Pan spread",
+      kind: "range",
+      min: 0,
+      max: 1,
+      step: 0.01,
+      default: 0.5,
+    },
+    {
+      key: "scanSpeed",
+      label: "Scan speed",
+      kind: "range",
+      min: -4,
+      max: 4,
+      step: 0.1,
+      default: 1,
+    },
+    {
+      key: "playheadMode",
+      label: "Playhead mode",
+      kind: "select",
+      options: ["shared", "per-note"],
+      default: "shared",
+    },
+    {
+      key: "directPitchSemitones",
+      label: "Direct-play pitch (semitones)",
+      kind: "range",
+      min: -24,
+      max: 24,
+      step: 1,
       default: 0,
     },
   ],

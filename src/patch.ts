@@ -25,6 +25,9 @@ export interface TempoState {
   subdivision: number;
   limiterCeiling: number;
   limiterRelease: number;
+  reverbDecaySeconds: number;
+  reverbPreDelayMs: number;
+  reverbDampingHz: number;
 }
 
 export function serializePatch(
@@ -44,6 +47,9 @@ export function serializePatch(
     masterEffects: model.getMasterEffects(),
     limiterCeiling: tempoState.limiterCeiling,
     limiterRelease: tempoState.limiterRelease,
+    reverbDecaySeconds: tempoState.reverbDecaySeconds,
+    reverbPreDelayMs: tempoState.reverbPreDelayMs,
+    reverbDampingHz: tempoState.reverbDampingHz,
     rows: model.getRows().map((row) => ({
       name: row.config.name,
       sourceType: row.config.sourceType,
@@ -103,6 +109,15 @@ export async function applyPatch(
     subdivision: patch.subdivision,
     limiterCeiling: patch.limiterCeiling,
     limiterRelease: patch.limiterRelease,
+    // ?? fallback: patches saved before these fields existed have no such
+    // key -- falling back to undefined here would make the master panel's
+    // sliders render `value: undefined` (NaN), not just silently keep an
+    // old setting, so this is a correctness fallback, not a migration
+    // system (see GridModel's own reverb.setParams call for these same
+    // numbers).
+    reverbDecaySeconds: patch.reverbDecaySeconds ?? 2.2,
+    reverbPreDelayMs: patch.reverbPreDelayMs ?? 20,
+    reverbDampingHz: patch.reverbDampingHz ?? 6000,
   };
 }
 
