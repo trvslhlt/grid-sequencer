@@ -24,6 +24,7 @@ export interface PatchRow {
   effects: unknown[];
   reverbSend: number;
   sampleRange: { start: number; end: number };
+  reversed: boolean;
   /** Per-source-type params (waveform/detune/harmonicity/etc, see
    * sourceFactory.ts's RowSource.getParams()) -- opaque here too. */
   sourceParams: Record<string, unknown>;

@@ -79,7 +79,11 @@ selection away and back) and a row/column-level section (Defaults/
 Envelope, including the section button's disabled-but-shown-active state
 following the global precedence setting live), dragging an Envelope
 section's breakpoint-curve editor and confirming the shape persists across
-reselection, the explicitDuration trigger mode's steps-based duration
+reselection, a sample row's "Reverse playback" checkbox (non-destructive,
+keeps working after reassigning a different sample mid-toggle, persists
+through a patch save/reload) and the Manage Library page's separate,
+permanent, destructive "Reverse" button on a sample itself, the
+explicitDuration trigger mode's steps-based duration
 field, the modular effects chain (no effects by default at any level —
 row/cell/master alike; adding each of the 6 types and confirming that
 instance's own full param list appears; adding a duplicate type and
@@ -320,7 +324,27 @@ make run-image-backend
   Effects section, against a draft copy — **Save changes** commits it
   back to the library. Deleting a sample a saved patch still references
   doesn't break loading that patch — the row just ends up without a
-  sample instead (see Known limitations).
+  sample instead (see Known limitations). Samples also get a
+  **Reverse** button here — permanent and destructive, rewriting the
+  stored audio file's own PCM data in place (`backend/src/
+  sampleStore.ts`'s `reverseSampleAudio`, done server-side with no
+  client round-trip since every sample this app stores is the same
+  16-bit PCM WAV shape `wavEncoder.ts` produces) — distinct from, and
+  unrelated to, a row's own non-destructive **Reverse playback**
+  checkbox below. A row that already has this sample loaded keeps
+  playing whatever it already decoded; only a fresh assignment from the
+  library picks up the reversed audio (see Known limitations).
+- **Reverse playback** (sample rows only, row panel, next to
+  "Playback"): a non-destructive playback-direction flip, toggleable any
+  time — before or after a sample's assigned, mid-session, whatever.
+  Flips whichever buffer is actually loaded (or the next one assigned,
+  if toggled first); survives swapping to a different library sample and
+  round-trips through patch save/load, same as `playbackMode`. Since
+  `AudioBufferSourceNode.playbackRate` can't go negative and bruit-kit's
+  `SamplePlayer` has no reverse concept of its own, this works by
+  reversing the actual decoded buffer client-side (`GridModel.
+  setRowReversed`) — reversing twice is exactly the identity, so
+  toggling back off is just as cheap as toggling on.
 - **Sample playback range** (sample rows only, once a sample is loaded): a
   waveform view with two drag handles trims which portion of the buffer
   actually plays — e.g. picking one hit out of a multi-hit recording, or
@@ -438,12 +462,15 @@ backend/                 Express + TypeScript storage for patches/samples/preset
     server.ts              wires the four routers, ensures patches/samples/instrumentPresets/
                               effectChainPresets exist
     patchStore.ts            one JSON file per patch, keyed by id
-    sampleStore.ts           sidecar JSON + binary file per uploaded sample
+    sampleStore.ts           sidecar JSON + binary file per uploaded sample;
+                               reverseSampleAudio reverses a WAV's own PCM
+                               data in place, server-side, no decode needed
     instrumentPresetStore.ts one JSON file per preset, keyed by id
     effectChainPresetStore.ts one JSON file per saved effect chain, keyed by id
     routes/
       patches.ts              list/get/save, name uniqueness, "demo" protection
-      samples.ts               list/upload (multer)/stream-by-id/rename-recategorize/delete
+      samples.ts               list/upload (multer)/stream-by-id/rename-recategorize/
+                                 permanently-reverse/delete
       instrumentPresets.ts     list/get/create/update/delete
       effectChainPresets.ts    list/get/create/update/delete
   patches/, samples/, instrumentPresets/, effectChainPresets/   gitignored, created at runtime
@@ -508,3 +535,9 @@ arbitrarily reroute per note):
   picker, by design (see `src/grid/scale.ts`'s `quantizeToScale`, applied
   in `GridModel.fireTick` right before `noteOn`, not anywhere in the
   resolved-config the panel itself reads).
+- **Permanently reversing a library sample doesn't retroactively touch
+  rows that already have it loaded.** A row keeps playing whatever
+  `AudioBuffer` it already decoded in memory; only a fresh assignment
+  from the Sample Library panel (or a patch load) fetches the
+  now-reversed file and picks up the change. There's no "N rows use this
+  sample, reload them?" prompt before or after reversing.

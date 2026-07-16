@@ -28,6 +28,7 @@ import {
   listPatches,
   listSamples,
   loadPatch,
+  reverseSample,
   savePatch,
   updateEffectChainPreset,
   updateInstrumentPreset,
@@ -559,6 +560,30 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
           renderLibraryPanels();
         });
         itemEl.appendChild(renameButton);
+
+        // Permanent, destructive -- rewrites the stored audio file itself
+        // in place (see backend/src/sampleStore.ts's reverseSampleAudio).
+        // Unrelated to a row's own non-destructive "Reverse playback"
+        // checkbox: rows that already have this sample loaded keep
+        // playing whatever they decoded earlier, since this never touches
+        // an already-decoded in-memory buffer -- only a fresh assignment
+        // from the library picks up the reversed audio.
+        const reverseButton = document.createElement("button");
+        reverseButton.textContent = "Reverse";
+        reverseButton.addEventListener("click", async () => {
+          if (
+            !window.confirm(
+              `Reverse "${sample.name}"? This permanently rewrites the stored audio and can't be undone.`,
+            )
+          ) {
+            return;
+          }
+          await reverseSample(sample.id);
+          await refreshAvailableSamples();
+          renderManagementPage();
+          renderLibraryPanels();
+        });
+        itemEl.appendChild(reverseButton);
 
         const deleteButton = document.createElement("button");
         deleteButton.textContent = "Delete";

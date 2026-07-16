@@ -5,12 +5,15 @@
 // never lets one side win unconditionally regardless of its own toggle),
 // drag an Envelope section's breakpoint-curve editor and confirm it persists, a sample
 // row's playback range view (drag handles trim which portion of the
-// buffer plays, also persisted), the main page's select-only Sample/
-// Instrument Library panels (collapsible trees, click-to-assign onto the
-// selected row, instrument presets grey out on a source-type mismatch),
-// the library management page (in-app toggle, not a route -- full CRUD:
-// add/rename/re-categorize/delete a sample, edit/delete an instrument
-// preset, rename/edit/delete an effect chain preset), the explicitDuration
+// buffer plays, also persisted) and its "Reverse playback" checkbox (a
+// non-destructive playback-direction flip, keeps working after
+// reassigning a different sample while it's on, persists through a patch
+// save/reload), the main page's select-only Sample/Instrument Library
+// panels (collapsible trees, click-to-assign onto the selected row,
+// instrument presets grey out on a source-type mismatch), the library
+// management page (in-app toggle, not a route -- full CRUD: add/rename/
+// re-categorize/permanently-reverse/delete a sample, edit/delete an
+// instrument preset, rename/edit/delete an effect chain preset), the explicitDuration
 // trigger mode's steps-based duration field, the modular effects chain
 // (no effects at any level -- row/cell/master alike -- by default; add
 // any of the 6 types as needed, including multiple instances of the same
@@ -512,6 +515,58 @@ if ((await rangeSvg.count()) === 0) {
     } else {
       ok("sample playback range view shows, drags, and persists");
     }
+  }
+}
+
+// "Reverse playback" checkbox (samplePlayer rows only): a non-destructive
+// playback-direction flip (see GridModel.setRowReversed) -- distinct from
+// the Manage Library page's own permanent, destructive "Reverse" button
+// tested further below. Still on Kicker. Left ON here (not toggled back
+// off) so it carries into the "heavily-mutated state" patch-save/reload
+// round-trip further down, same as the scale/reverb-decay changes there.
+const reverseField = page.locator(".panel-field", {
+  hasText: "Reverse playback",
+});
+if ((await reverseField.count()) === 0) {
+  fail("sample row should show a Reverse playback checkbox");
+} else {
+  const reverseCheckbox = reverseField.locator("input[type=checkbox]");
+  if (await reverseCheckbox.isChecked()) {
+    fail("Reverse playback should start unchecked");
+  }
+  await reverseCheckbox.click();
+  await page.waitForTimeout(50);
+  await page.click("#play-button");
+  await page.waitForTimeout(600);
+  const playheadReversed = await page.evaluate(
+    () => document.querySelectorAll(".cell.playhead").length,
+  );
+  await page.click("#stop-button");
+  if (playheadReversed === 0) {
+    fail("playhead stopped advancing with Reverse playback active");
+  } else if (errors.length > 0) {
+    fail(`errors with Reverse playback active:\n${errors.join("\n")}`);
+  }
+  // Reselect away and back to force a render from live model state.
+  await page
+    .locator(".row-master", { hasText: "Synth" })
+    .click({ button: "right" });
+  await page.waitForTimeout(50);
+  await page
+    .locator(".row-master", { hasText: "Kicker" })
+    .click({ button: "right" });
+  await page.waitForTimeout(50);
+  if (
+    !(await page
+      .locator(".panel-field", { hasText: "Reverse playback" })
+      .locator("input[type=checkbox]")
+      .isChecked())
+  ) {
+    fail("Reverse playback checkbox did not survive a reselect");
+  } else {
+    ok(
+      "Reverse playback toggles on, keeps playback working, and survives a reselect",
+    );
   }
 }
 
@@ -1315,6 +1370,22 @@ if (!patchOptionValue) {
   } else {
     ok("saved patch round-trips its reverb decay through the backend");
   }
+  await page
+    .locator(".row-master", { hasText: "Kicker" })
+    .click({ button: "right" });
+  await page.waitForTimeout(50);
+  if (
+    !(await page
+      .locator(".panel-field", { hasText: "Reverse playback" })
+      .locator("input[type=checkbox]")
+      .isChecked())
+  ) {
+    fail("loaded patch should restore Kicker's Reverse playback setting");
+  } else {
+    ok(
+      "saved patch round-trips a row's Reverse playback setting through the backend",
+    );
+  }
 }
 
 // Library management page: full CRUD for samples and instrument presets,
@@ -1383,6 +1454,32 @@ if (
   fail("re-categorizing a sample in the management page did not move it");
 } else {
   ok("management page re-categorizes a sample");
+}
+
+// Permanent, destructive reverse (backend/src/sampleStore.ts's
+// reverseSampleAudio, reversing the WAV file's own PCM data in place) --
+// distinct from a row's own non-destructive "Reverse playback" checkbox
+// tested earlier. Still in the "fx" group from the re-categorize step.
+const fxRow = page.locator("#sample-management .management-row", {
+  hasText: "Verify Upload Renamed",
+});
+page.once("dialog", (dialog) => dialog.accept());
+await fxRow.locator("button", { hasText: "Reverse" }).click();
+await page.waitForTimeout(300);
+if (
+  (await page
+    .locator("#sample-management .management-row", {
+      hasText: "Verify Upload Renamed",
+    })
+    .count()) === 0
+) {
+  fail(
+    "permanently reversing a sample in the management page removed it from the list",
+  );
+} else if (errors.length > 0) {
+  fail(`errors after permanently reversing a sample:\n${errors.join("\n")}`);
+} else {
+  ok("management page permanently reverses a sample's stored audio");
 }
 
 // Delete it.

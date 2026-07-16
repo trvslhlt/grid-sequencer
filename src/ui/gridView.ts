@@ -638,6 +638,20 @@ export function createGridView(
           render();
         },
       });
+      // Non-destructive -- flips playback direction of whatever sample's
+      // loaded (or the next one assigned), leaves the library file alone.
+      // See the Manage Library page's own "Reverse" for the permanent,
+      // destructive version.
+      fields.push({
+        key: "reversed",
+        label: "Reverse playback",
+        kind: "checkbox",
+        value: row.config.reversed,
+        onChange: (v) => {
+          model.setRowReversed(row, v);
+          render();
+        },
+      });
     }
 
     fields.push({

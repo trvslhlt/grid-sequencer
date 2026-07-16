@@ -21,6 +21,7 @@ export interface PatchRow {
   effects: unknown[];
   reverbSend: number;
   sampleRange: { start: number; end: number };
+  reversed: boolean;
   sourceParams: Record<string, unknown>;
   sampleId: string | null;
   cells: unknown[];
@@ -170,6 +171,21 @@ export async function updateSample(
 export async function deleteSample(id: string): Promise<void> {
   const response = await fetch(`/api/samples/${id}`, { method: "DELETE" });
   if (!response.ok) throw new Error(`Failed to delete sample ${id}`);
+}
+
+/** Permanently reverses the stored library file itself (server-side, in
+ * place -- see backend/src/sampleStore.ts's reverseSampleAudio) -- distinct
+ * from a row's own non-destructive "Reverse playback" toggle
+ * (GridModel.setRowReversed), which flips a row's already-decoded buffer
+ * and never touches the library. Rows that already have this sample loaded
+ * keep playing whatever buffer they decoded earlier; only a fresh
+ * assignment picks up the reversed audio. */
+export async function reverseSample(id: string): Promise<SampleMetadata> {
+  const response = await fetch(`/api/samples/${id}/reverse`, {
+    method: "POST",
+  });
+  if (!response.ok) throw new Error(`Failed to reverse sample ${id}`);
+  return response.json();
 }
 
 /** A saved instrument sound -- source type + that source's own params +

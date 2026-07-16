@@ -73,6 +73,17 @@ export interface RowConfig {
    * Ignored by every other source type -- there's nothing to trim before a
    * sample is loaded, or for a source that doesn't play from a buffer. */
   sampleRange: { start: number; end: number };
+  /** samplePlayer rows only: non-destructive playback-direction flip.
+   * GridModel reverses whichever buffer is actually loaded (in place, see
+   * setRowReversed/loadRowSample) rather than this being a param passed to
+   * bruit-kit -- SamplePlayer has no reverse concept of its own, and
+   * AudioBufferSourceNode.playbackRate can't go negative. Toggle any time,
+   * before or after a sample is assigned; survives assigning a different
+   * sample from the library. For a destructive, permanent reverse of the
+   * stored library sample itself, see the Manage Library page's own
+   * "Reverse" action instead -- unrelated to this flag, and doesn't touch
+   * it. */
+  reversed: boolean;
 }
 
 export interface ColumnConfig {

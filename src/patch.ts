@@ -65,6 +65,7 @@ export function serializePatch(
       effects: row.config.effects,
       reverbSend: row.config.reverbSend,
       sampleRange: row.config.sampleRange,
+      reversed: row.config.reversed,
       sourceParams: row.source.getParams(),
       sampleId: rowSampleIds.get(row.id) ?? null,
       cells: row.cells,
@@ -136,6 +137,10 @@ async function addPatchRow(
   if (!patchRow.enabled) model.setRowEnabled(row, false);
   model.setRowTriggerMode(row, patchRow.triggerMode as TriggerMode);
   model.setRowPlaybackMode(row, patchRow.playbackMode as "direct" | "pitched");
+  // Before the sample-loading block below -- loadRowSample reverses an
+  // incoming buffer based on this flag, so it needs to already be set by
+  // the time a sample gets fetched/decoded, not after.
+  if (patchRow.reversed) model.setRowReversed(row, true);
   if (patchRow.defaultsOverride) model.setRowDefaultsOverride(row, true);
   model.setRowDefaultNote(row, patchRow.defaultNote);
   model.setRowDefaultGain(row, patchRow.defaultGain);

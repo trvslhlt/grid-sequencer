@@ -6,6 +6,7 @@ import {
   deleteSample,
   findSampleFile,
   listSamples,
+  reverseSampleAudio,
   updateSampleMetadata,
   writeSample,
 } from "../sampleStore.js";
@@ -84,6 +85,24 @@ samplesRouter.patch("/:id", async (req, res) => {
     return;
   }
   res.json(updated);
+});
+
+samplesRouter.post("/:id/reverse", async (req, res) => {
+  try {
+    const updated = await reverseSampleAudio(req.params.id);
+    if (!updated) {
+      res.status(404).json({ error: "Sample not found" });
+      return;
+    }
+    res.json(updated);
+  } catch (err) {
+    // Only reachable if a sample's stored file somehow isn't the 16-bit
+    // PCM WAV shape every upload path in this app produces -- see
+    // sampleStore.ts's reverseWavPcm16InPlace doc.
+    res.status(400).json({
+      error: err instanceof Error ? err.message : "Failed to reverse sample",
+    });
+  }
 });
 
 samplesRouter.delete("/:id", async (req, res) => {

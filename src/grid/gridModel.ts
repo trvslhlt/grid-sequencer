@@ -70,6 +70,32 @@ const SOURCE_ENVELOPE_FLOOR = {
  * for a MIDI velocity value to usefully carry. */
 const FULL_VELOCITY = 127;
 
+/** Flips a buffer's own sample-frame order, per channel -- the only way to
+ * play "backward" at all, since AudioBufferSourceNode.playbackRate can't go
+ * negative and bruit-kit's SamplePlayer has no reverse concept of its own
+ * (see RowConfig.reversed's doc). Reversing twice is exactly the identity,
+ * so callers never need to keep the original buffer around alongside a
+ * reversed copy -- just reverse in place again to flip back. */
+function reverseAudioBuffer(
+  audioContext: AudioContext,
+  buffer: AudioBuffer,
+): AudioBuffer {
+  const reversed = audioContext.createBuffer(
+    buffer.numberOfChannels,
+    buffer.length,
+    buffer.sampleRate,
+  );
+  for (let channel = 0; channel < buffer.numberOfChannels; channel++) {
+    const source = buffer.getChannelData(channel);
+    const dest = reversed.getChannelData(channel);
+    const length = source.length;
+    for (let i = 0; i < length; i++) {
+      dest[i] = source[length - 1 - i];
+    }
+  }
+  return reversed;
+}
+
 function createEnvelope(): EnvelopeParams {
   return { points: BUILT_INS.envelope.points.map((p) => ({ ...p })) };
 }
@@ -285,6 +311,7 @@ export class GridModel {
       effects: [],
       reverbSend: 0,
       sampleRange: { start: 0, end: 1 },
+      reversed: false,
     };
     if (sourceType === "samplePlayer") {
       source.setParams({
@@ -333,11 +360,18 @@ export class GridModel {
     this.rows.splice(this.rows.indexOf(runtime), 1);
   }
 
+  /** If this row's reverse toggle is already on when a new sample gets
+   * assigned, the incoming buffer is reversed before it's stored/loaded --
+   * `reversed` is a row-level setting that survives swapping which sample
+   * is loaded, same as playbackMode does. */
   async loadRowSample(row: Row, buffer: AudioBuffer): Promise<void> {
     const runtime = this.findRuntime(row);
     if (!runtime || !runtime.source.loadSample) return;
-    await runtime.source.loadSample(buffer);
-    runtime.sampleBuffer = buffer;
+    const activeBuffer = runtime.config.reversed
+      ? reverseAudioBuffer(this.audioContext, buffer)
+      : buffer;
+    await runtime.source.loadSample(activeBuffer);
+    runtime.sampleBuffer = activeBuffer;
   }
 
   /** Not part of the public `Row` shape (see its own doc for why) --
@@ -435,6 +469,24 @@ export class GridModel {
         rangeEnd: range.end,
       });
     }
+  }
+
+  /** Reverses whichever buffer is currently loaded, in place -- every
+   * reader of runtime.sampleBuffer (the row's own shared SamplePlayer,
+   * sampleRangeSeconds, and fireSamplePlayerOverride's per-hit node alike)
+   * sees the correct audio afterward with no special-casing, since none of
+   * them care whether that buffer happens to be a reversed copy. No buffer
+   * loaded yet (e.g. toggled from a patch before its sample fetch resolves)
+   * just records the flag -- loadRowSample applies it to whatever loads
+   * next. */
+  setRowReversed(row: Row, reversed: boolean): void {
+    const runtime = this.findRuntime(row);
+    if (!runtime || runtime.config.reversed === reversed) return;
+    runtime.config = { ...runtime.config, reversed };
+    if (!runtime.sampleBuffer) return;
+    const buffer = reverseAudioBuffer(this.audioContext, runtime.sampleBuffer);
+    runtime.sampleBuffer = buffer;
+    if (runtime.source.loadSample) void runtime.source.loadSample(buffer);
   }
 
   /** Re-acquires the cache entry for the *new* effects config before
