@@ -85,8 +85,8 @@ through a patch save/reload) and the Manage Library page's separate,
 permanent, destructive "Reverse" button on a sample itself, the
 explicitDuration trigger mode's steps-based duration
 field, the modular effects chain (no effects by default at any level —
-row/cell/master alike; adding each of the 6 types and confirming that
-instance's own full param list appears; adding a duplicate type and
+row/cell/master alike; adding each of bruit-kit's effect types and
+confirming that instance's own full param list appears; adding a duplicate type and
 removing just one instance; dragging a param's value with no render call
 missed in between — a stale-closure regression that used to silently
 drop the change, since fixed), saving a configured chain to the Effect
@@ -178,13 +178,13 @@ make run-image-backend
   row's or column's values ahead of time and switch them on with one
   click.
 - **Effects** (row, cell, and master — see below): a modular, ordered
-  chain — **no effects by default** at any level. Add any of the 6 types
-  as needed via the section's own "Add effect…" picker + **Add** button;
-  nothing stops adding the same type twice (e.g. two delays in series,
-  each independently configurable). Each already-added instance renders
-  as its own "**\<Type> — Remove**" button (doubling as that instance's
-  heading) followed by **every** param its underlying bruit-kit class
-  actually supports, not a hand-picked subset:
+  chain — **no effects by default** at any level. Add any of bruit-kit's
+  effect types as needed via the section's own "Add effect…" picker +
+  **Add** button; nothing stops adding the same type twice (e.g. two
+  delays in series, each independently configurable). Each already-added
+  instance renders as its own "**\<Type> — Remove**" button (doubling as
+  that instance's heading) followed by **every** param its underlying
+  bruit-kit class actually supports, not a hand-picked subset:
   - **Filter** — type (lowpass/highpass/bandpass/lowshelf/highshelf/
     peaking/notch/allpass), cutoff, resonance (Q), gain (dB — only
     audible for lowshelf/highshelf/peaking; previously missing from
@@ -197,6 +197,19 @@ make run-image-backend
     — every non-custom `OscillatorType`), wet.
   - **Ring Mod** — carrier frequency, carrier shape (sine/square/
     sawtooth/triangle), wet.
+  - **Chorus** — rate, depth, wet. Two phase-inverted delay voices swept
+    by one LFO.
+  - **Flanger** — rate, depth, feedback, wet. A much shorter modulated
+    delay than Chorus, plus a feedback loop, for the classic "jet swoosh."
+  - **Phaser** — rate, depth, feedback, wet. A 4-stage cascaded allpass
+    filter sweep, not a single swept filter like Filter above.
+  - **Auto-Wah** — base frequency, resonance (Q), sensitivity, attack
+    speed, wet. An envelope follower (not an LFO) sweeps a bandpass
+    filter with how loud the input actually is.
+  - **Bitcrusher** — bit depth, output gain, wet. Quantizes amplitude
+    into `2^bits` discrete steps (bit-depth reduction only — no
+    sample-rate reduction/aliasing, which needs an `AudioWorkletProcessor`
+    bruit-kit doesn't provide for this effect yet).
 
   Once a chain has at least one effect, **Save chain as preset…** saves
   the whole ordered list to the **Effect Library** (see below) for reuse

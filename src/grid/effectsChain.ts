@@ -1,8 +1,13 @@
 import {
+  AutoWahEffect,
+  BitcrusherEffect,
+  ChorusEffect,
   CompressorEffect,
   DelayEffect,
   DistortionEffect,
   FilterEffect,
+  FlangerEffect,
+  PhaserEffect,
   RingModulationEffect,
   TremoloEffect,
   chainEffects,
@@ -50,6 +55,31 @@ function instantiateEffect(
     }
     case "ringMod": {
       const fx = new RingModulationEffect(audioContext);
+      fx.setParams({ wet: 1, ...spec.params });
+      return fx;
+    }
+    case "chorus": {
+      const fx = new ChorusEffect(audioContext);
+      fx.setParams({ wet: 1, ...spec.params });
+      return fx;
+    }
+    case "flanger": {
+      const fx = new FlangerEffect(audioContext);
+      fx.setParams({ wet: 1, ...spec.params });
+      return fx;
+    }
+    case "phaser": {
+      const fx = new PhaserEffect(audioContext);
+      fx.setParams({ wet: 1, ...spec.params });
+      return fx;
+    }
+    case "autoWah": {
+      const fx = new AutoWahEffect(audioContext);
+      fx.setParams({ wet: 1, ...spec.params });
+      return fx;
+    }
+    case "bitcrusher": {
+      const fx = new BitcrusherEffect(audioContext);
       fx.setParams({ wet: 1, ...spec.params });
       return fx;
     }

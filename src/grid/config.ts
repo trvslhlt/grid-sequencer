@@ -7,7 +7,12 @@ export type EffectType =
   | "distortion"
   | "compressor"
   | "tremolo"
-  | "ringMod";
+  | "ringMod"
+  | "chorus"
+  | "flanger"
+  | "phaser"
+  | "autoWah"
+  | "bitcrusher";
 
 export interface EffectSpec {
   type: EffectType;

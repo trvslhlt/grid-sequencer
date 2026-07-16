@@ -16,11 +16,11 @@
 // instrument preset, rename/edit/delete an effect chain preset), the explicitDuration
 // trigger mode's steps-based duration field, the modular effects chain
 // (no effects at any level -- row/cell/master alike -- by default; add
-// any of the 6 types as needed, including multiple instances of the same
-// type, e.g. two delays) and *every* one of each type's own params,
-// including ones added after an "expose all available params" pass
-// (filter gain, compressor knee, tremolo/ring-mod's full non-custom
-// waveform set), the Effect Library (save a whole configured chain,
+// any of bruit-kit's effect types as needed, including multiple
+// instances of the same type, e.g. two delays) and *every* one of each
+// type's own params, including ones added after an "expose all available
+// params" pass (filter gain, compressor knee, tremolo/ring-mod's full
+// non-custom waveform set), the Effect Library (save a whole configured chain,
 // apply it additively to a different row/cell/master) -- FmSynth's and
 // GranularSynth's own
 // previously-under-exposed params (carrier/modulator waveform; every grain
@@ -753,6 +753,19 @@ const EFFECT_PARAM_LABELS = {
   ],
   tremolo: ["Rate (Hz)", "Depth", "LFO shape", "Wet"],
   ringMod: ["Frequency (Hz)", "Carrier shape", "Wet"],
+  // Added to bruit-kit after the original 6 -- see effectsChain.ts's
+  // instantiateEffect and this same EFFECT_TABLE shape in gridView.ts.
+  chorus: ["Rate (Hz)", "Depth (ms)", "Wet"],
+  flanger: ["Rate (Hz)", "Depth (ms)", "Feedback", "Wet"],
+  phaser: ["Rate (Hz)", "Depth", "Feedback", "Wet"],
+  autoWah: [
+    "Base frequency (Hz)",
+    "Resonance (Q)",
+    "Sensitivity",
+    "Attack speed (Hz)",
+    "Wet",
+  ],
+  bitcrusher: ["Bit depth", "Output gain", "Wet"],
 };
 const EFFECT_TYPE_LABELS = {
   filter: "Filter",
@@ -761,6 +774,11 @@ const EFFECT_TYPE_LABELS = {
   compressor: "Compressor",
   tremolo: "Tremolo",
   ringMod: "Ring Mod",
+  chorus: "Chorus",
+  flanger: "Flanger",
+  phaser: "Phaser",
+  autoWah: "Auto-Wah",
+  bitcrusher: "Bitcrusher",
 };
 
 for (const [type, typeLabel] of Object.entries(EFFECT_TYPE_LABELS)) {
@@ -777,7 +795,7 @@ for (const [type, typeLabel] of Object.entries(EFFECT_TYPE_LABELS)) {
   }
 }
 ok(
-  "adding each of the 6 effect types shows that instance's own full param list",
+  `adding each of the ${Object.keys(EFFECT_TYPE_LABELS).length} effect types shows that instance's own full param list`,
 );
 
 if ((await saveChainPresetButton(rowPanel).count()) === 0) {
@@ -832,8 +850,9 @@ if (
   ok("Tremolo and Ring Mod expose every non-custom oscillator waveform");
 }
 
-// Save this 6-effect chain as a library preset -- applied to a different
-// row later, via the main-page Effect Library panel.
+// Save this whole chain (one of every effect type, plus a duplicate
+// Delay) as a library preset -- applied to a different row later, via
+// the main-page Effect Library panel.
 page.once("dialog", (dialog) => dialog.accept("Verify Chain"));
 await saveChainPresetButton(rowPanel).click();
 await page.waitForTimeout(400);
@@ -879,7 +898,7 @@ await page
   .click({ button: "right" });
 await page.waitForTimeout(50);
 
-// Filter was added to Kicker back in the "add each of the 6 types" loop
+// Filter was added to Kicker back in the "add each effect type" loop
 // above -- reused here rather than adding a fresh one.
 const filterCutoffInput = effectParam(rowPanel, "Cutoff (Hz)").locator(
   "input[type=range]",
@@ -933,8 +952,8 @@ if (
 // DelayNode emits nothing until its delay time has elapsed, so a short
 // percussive hit never got heard at all. This can't assert on audio
 // samples from here, but it does confirm the row keeps firing (playhead
-// still advances) with a full 6-effect chain -- including Delay --
-// active, and nothing throws.
+// still advances) with the full chain -- one of every effect type,
+// including Delay -- active, and nothing throws.
 await page.click("#play-button");
 await page.waitForTimeout(600);
 const playheadWithEffects = await page.evaluate(
