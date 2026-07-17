@@ -12,7 +12,8 @@ export type EffectType =
   | "flanger"
   | "phaser"
   | "autoWah"
-  | "bitcrusher";
+  | "bitcrusher"
+  | "reverb";
 
 export interface EffectSpec {
   type: EffectType;
@@ -71,7 +72,14 @@ export interface RowConfig {
   /** This row's persistent effect chain, built once and never torn down
    * until the row is removed (see effectsChain.ts). */
   effects: EffectSpec[];
-  reverbSend: number;
+  /** 0..1: how much of this row's (post-effects) output reaches the
+   * shared send bus (see GridModel's sendBusInput/sendChain) -- a
+   * parallel tap, not a replacement for the row's own direct path to the
+   * master bus. The send bus's own effect chain (Master panel's "Send
+   * Bus" section) decides what happens to whatever arrives here; it's
+   * arbitrary and user-configured, not hardcoded to reverb any more, so
+   * this is deliberately not called "reverbSend". */
+  sendLevel: number;
   /** samplePlayer rows only: 0..1 fractions of the loaded sample's own
    * duration, trimming which portion actually plays (see bruit-kit's
    * SamplePlayerParams.rangeStart/rangeEnd, which this maps straight onto).

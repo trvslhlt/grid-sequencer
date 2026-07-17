@@ -24,9 +24,12 @@
 // apply it additively to a different row/cell/master) -- FmSynth's and
 // GranularSynth's own
 // previously-under-exposed params (carrier/modulator waveform; every grain
-// param, not just density/pitch-jitter), the shared reverb bus's own
-// decay/pre-delay/damping (previously hardcoded with no UI at all, now
-// live-adjustable and persisted through patches), add one of each of the
+// param, not just density/pitch-jitter), the Master panel's two titled
+// effect-chain sections ("Effects", the insert chain; "Send Bus", an
+// arbitrary chain fed by each row's own Send level -- previously a single
+// hardcoded ReverbEffect with dedicated sliders, now just another
+// modular chain, live-adjustable and persisted through patches like
+// everywhere else), add one of each of the
 // 5 source types (GranularSynth exercises its async worklet init), flip
 // row/column precedence, tempo, step count, and the global key/scale
 // (playback keeps working, note fields stay untouched by the silent
@@ -766,6 +769,10 @@ const EFFECT_PARAM_LABELS = {
     "Wet",
   ],
   bitcrusher: ["Bit depth", "Output gain", "Wet"],
+  // Used to be a hardcoded master-bus singleton with its own dedicated
+  // sliders -- now just another EFFECT_TABLE entry, usable on any row,
+  // cell, master insert chain, or the Send Bus alike.
+  reverb: ["Decay (s)", "Pre-delay (ms)", "Damping (Hz)", "Wet"],
 };
 const EFFECT_TYPE_LABELS = {
   filter: "Filter",
@@ -779,6 +786,7 @@ const EFFECT_TYPE_LABELS = {
   phaser: "Phaser",
   autoWah: "Auto-Wah",
   bitcrusher: "Bitcrusher",
+  reverb: "Reverb",
 };
 
 for (const [type, typeLabel] of Object.entries(EFFECT_TYPE_LABELS)) {
@@ -1194,7 +1202,12 @@ if (columnBefore.includes("off") === columnAfter.includes("off")) {
 }
 await firstColumn.click(); // restore
 
-// Select master -- gain, effects chain, and limiter controls.
+// Select master -- gain, limiter, and two titled effect-chain sections:
+// "Effects" (the master bus's own insert chain, unchanged) and "Send
+// Bus" (an arbitrary chain fed by each row's own Send level -- used to
+// be a single hardcoded ReverbEffect with dedicated decay/pre-delay/
+// damping/wet sliders; now Reverb is just one of the effect types
+// available to add to it, same EFFECT_TABLE as everywhere else).
 await page.click("#master-button");
 await page.waitForTimeout(50);
 if ((await page.locator(".panel-title").textContent()) !== "Master") {
@@ -1204,44 +1217,81 @@ const masterPanel = page.locator(".selection-panel");
 const masterText = await masterPanel.innerText();
 for (const label of [
   "Gain",
-  "Add effect…", // master's Effects fields, spread in directly -- no default chain
   "Limiter ceiling",
   "Limiter release",
-  "Reverb decay",
-  "Reverb pre-delay",
-  "Reverb damping",
+  "Effects",
+  "Send Bus",
 ]) {
   if (!masterText.includes(label)) fail(`master panel missing "${label}"`);
 }
-ok("master panel has gain/effects/limiter/reverb controls");
+ok("master panel has gain/limiter/effects/send-bus controls");
 
-// Master's own effects chain behaves identically to a row's: no default
-// chain, add/remove works the same way.
-if ((await removeEffectButton(masterPanel, "Filter").count()) !== 0) {
-  fail("master panel should start with no default effects chain");
+// Master's own insert-effects chain behaves identically to a row's: no
+// default chain, add/remove works the same way.
+const masterEffectsSection = section(page, "Effects");
+if ((await masterEffectsSection.removeEffectButton("Filter").count()) !== 0) {
+  fail("master panel's Effects chain should start with no default chain");
 }
-await addEffect(masterPanel, "filter");
+await masterEffectsSection.addEffect("filter");
 await page.waitForTimeout(50);
-if ((await removeEffectButton(masterPanel, "Filter").count()) === 0) {
-  fail("adding an effect to the master panel did not add a removable instance");
-} else {
-  ok(
-    "master panel's Effects fields support the same add/remove chain as a row's",
+if ((await masterEffectsSection.removeEffectButton("Filter").count()) === 0) {
+  fail(
+    "adding an effect to the master panel's Effects chain did not add a removable instance",
   );
+} else {
+  ok("master panel's Effects chain supports the same add/remove as a row's");
 }
 
-// The shared reverb bus's own decay/pre-delay/damping used to be
-// hardcoded at construction with no UI at all -- confirm they're both
+// The send bus itself holds no chain by default (silent tap, same "no
+// default chain" rule as everywhere else) -- but the demo patch (loaded
+// at this point in the run) deliberately seeds it with a Reverb, so it
+// still sounds the way this app's demo always has (see main.ts's
+// seedDemoIfMissing and the "fresh reload's demo" checks further down).
+// Exercise that existing instance directly: its own decay/wet are
 // live-adjustable and actually persist through a patch save/reload,
 // same as every other master-level setting already does.
-const reverbDecayInput = page
-  .locator(".panel-field", { hasText: "Reverb decay" })
+const sendBusSection = section(page, "Send Bus");
+if ((await sendBusSection.removeEffectButton("Reverb").count()) === 0) {
+  fail("demo's Send Bus should already have a Reverb");
+}
+
+const reverbDecayInput = sendBusSection
+  .effectParam("Decay (s)")
   .locator("input[type=range]");
 await reverbDecayInput.evaluate((el) => {
   el.value = "5.5";
   el.dispatchEvent(new Event("input", { bubbles: true }));
 });
 await page.waitForTimeout(50);
+
+const reverbWetInput = sendBusSection
+  .effectParam("Wet")
+  .locator("input[type=range]");
+if ((await reverbWetInput.inputValue()) !== "1") {
+  fail(
+    `reverb wet should default to 1, got ${await reverbWetInput.inputValue()}`,
+  );
+}
+await reverbWetInput.evaluate((el) => {
+  el.value = "0.4";
+  el.dispatchEvent(new Event("input", { bubbles: true }));
+});
+await page.waitForTimeout(50);
+await page.click("#play-button");
+await page.waitForTimeout(600);
+const playheadWithReverbWet = await page.evaluate(
+  () => document.querySelectorAll(".cell.playhead").length,
+);
+await page.click("#stop-button");
+if (playheadWithReverbWet === 0) {
+  fail("playhead stopped advancing after lowering the send bus reverb's wet");
+} else if (errors.length > 0) {
+  fail(
+    `errors after lowering the send bus reverb's wet:\n${errors.join("\n")}`,
+  );
+} else {
+  ok("send bus's Reverb effect is live-adjustable and doesn't break playback");
+}
 
 // Precedence, tempo, and step count controls.
 await page.selectOption("#precedence-select", "column");
@@ -1337,8 +1387,15 @@ if (
 }
 await page.click("#master-button");
 await page.waitForTimeout(50);
-const demoReverbDecay = await page
-  .locator(".panel-field", { hasText: "Reverb decay" })
+// The demo patch seeds its own Send Bus with a Reverb (see main.ts's
+// seedDemoIfMissing) so it still sounds/behaves the way this app's demo
+// always has, even though the send bus itself holds nothing by default.
+const demoSendBusSection = section(page, "Send Bus");
+if ((await demoSendBusSection.removeEffectButton("Reverb").count()) === 0) {
+  fail("demo should load with a Reverb already in its Send Bus chain");
+}
+const demoReverbDecay = await demoSendBusSection
+  .effectParam("Decay (s)")
   .locator("input[type=range]")
   .inputValue();
 if (demoReverbDecay !== "2.2") {
@@ -1346,7 +1403,20 @@ if (demoReverbDecay !== "2.2") {
     `demo should load with the default 2.2s reverb decay, unaffected by this run's 5.5s change, got ${demoReverbDecay}`,
   );
 } else {
-  ok("fresh reload's demo resets reverb decay to the default (2.2s)");
+  ok(
+    "fresh reload's demo resets its Send Bus reverb decay to the default (2.2s)",
+  );
+}
+const demoReverbWet = await demoSendBusSection
+  .effectParam("Wet")
+  .locator("input[type=range]")
+  .inputValue();
+if (demoReverbWet !== "1") {
+  fail(
+    `demo should load with the default reverb wet of 1, unaffected by this run's 0.4 change, got ${demoReverbWet}`,
+  );
+} else {
+  ok("fresh reload's demo resets its Send Bus reverb wet to the default (1)");
 }
 
 const patchOptionValue = await page
@@ -1378,8 +1448,14 @@ if (!patchOptionValue) {
   }
   await page.click("#master-button");
   await page.waitForTimeout(50);
-  const loadedReverbDecay = await page
-    .locator(".panel-field", { hasText: "Reverb decay" })
+  const loadedSendBusSection = section(page, "Send Bus");
+  if ((await loadedSendBusSection.removeEffectButton("Reverb").count()) === 0) {
+    fail(
+      "loaded patch should restore the Reverb effect added to its Send Bus chain",
+    );
+  }
+  const loadedReverbDecay = await loadedSendBusSection
+    .effectParam("Decay (s)")
     .locator("input[type=range]")
     .inputValue();
   if (loadedReverbDecay !== "5.5") {
@@ -1387,7 +1463,18 @@ if (!patchOptionValue) {
       `loaded patch should restore the 5.5s reverb decay it was saved with, got ${loadedReverbDecay}`,
     );
   } else {
-    ok("saved patch round-trips its reverb decay through the backend");
+    ok("saved patch round-trips its Send Bus reverb decay through the backend");
+  }
+  const loadedReverbWet = await loadedSendBusSection
+    .effectParam("Wet")
+    .locator("input[type=range]")
+    .inputValue();
+  if (loadedReverbWet !== "0.4") {
+    fail(
+      `loaded patch should restore the 0.4 reverb wet it was saved with, got ${loadedReverbWet}`,
+    );
+  } else {
+    ok("saved patch round-trips its Send Bus reverb wet through the backend");
   }
   await page
     .locator(".row-master", { hasText: "Kicker" })

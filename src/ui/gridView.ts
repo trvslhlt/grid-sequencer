@@ -513,6 +513,48 @@ const EFFECT_TABLE: Array<{
       },
     ],
   },
+  {
+    type: "reverb",
+    label: "Reverb",
+    params: [
+      {
+        key: "decaySeconds",
+        label: "Decay (s)",
+        kind: "range",
+        min: 0.1,
+        max: 8,
+        step: 0.1,
+        default: 2.2,
+      },
+      {
+        key: "preDelayMs",
+        label: "Pre-delay (ms)",
+        kind: "range",
+        min: 0,
+        max: 200,
+        step: 1,
+        default: 20,
+      },
+      {
+        key: "dampingHz",
+        label: "Damping (Hz)",
+        kind: "range",
+        min: 500,
+        max: 12000,
+        step: 100,
+        default: 6000,
+      },
+      {
+        key: "wet",
+        label: "Wet",
+        kind: "range",
+        min: 0,
+        max: 1,
+        step: 0.01,
+        default: 1,
+      },
+    ],
+  },
 ];
 
 // Shared across every effectsFields call (row/cell/master alike) rather
@@ -674,7 +716,7 @@ function envelopeFields(
   ];
 }
 
-interface PanelSection {
+export interface PanelSection {
   title: string;
   fields: Field[];
   toggle?: { active: boolean; disabled?: boolean; onClick: () => void };
@@ -695,6 +737,14 @@ type Selection =
 
 export interface GridViewOptions {
   buildMasterFields: () => Field[];
+  /** Titled sections for the Master panel -- currently just "Effects"
+   * (the master bus's own insert chain, applied to everything) and "Send
+   * Bus" (an arbitrary chain fed by each row's own Send level, see
+   * config.ts's RowConfig.sendLevel doc). Kept as titled PanelSections
+   * rather than flat fields specifically so the two chains' "Add
+   * effect…"/param blocks read as visually distinct groups instead of
+   * one confusing run-on list. */
+  buildMasterSections: () => PanelSection[];
   /** Sample assignment now happens entirely through the main-page Sample
    * Library panel (select a row, click a sample there) -- this file no
    * longer does any loading/browsing UI itself, just shows what's already
@@ -894,14 +944,14 @@ export function createGridView(
     }
 
     fields.push({
-      key: "reverbSend",
-      label: "Reverb send",
+      key: "sendLevel",
+      label: "Send",
       kind: "range",
-      value: row.config.reverbSend,
+      value: row.config.sendLevel,
       min: 0,
       max: 1,
       step: 0.01,
-      onChange: (v) => model.setRowReverbSend(row, v),
+      onChange: (v) => model.setRowSendLevel(row, v),
     });
 
     const sourceParams = row.source.getParams();
@@ -1297,7 +1347,7 @@ export function createGridView(
       return {
         title: "Master",
         fields: options.buildMasterFields(),
-        sections: [],
+        sections: options.buildMasterSections(),
       };
     }
     if (selection.kind === "column") {

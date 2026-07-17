@@ -1,4 +1,4 @@
-import { ReverbEffect, createSend, scheduleAutomation } from "bruit-kit/audio";
+import { createSend, scheduleAutomation } from "bruit-kit/audio";
 import type { Send } from "bruit-kit/audio";
 import { createStepClock } from "bruit-kit/midi";
 import type { StepClock } from "bruit-kit/midi";
@@ -128,8 +128,9 @@ function createCellConfig(): CellConfig {
 }
 
 /** RowConfig plus the runtime plumbing (source instance, persistent chain,
- * reverb send, activation state) a row needs but the UI doesn't -- kept as
- * a class-private shape so callers only ever see the public `Row` fields. */
+ * send bus tap, activation state) a row needs but the UI doesn't -- kept
+ * as a class-private shape so callers only ever see the public `Row`
+ * fields. */
 interface RowRuntime {
   readonly id: string;
   config: RowConfig;
@@ -156,12 +157,11 @@ export type Row = Readonly<
 > & { isActive(): boolean };
 
 /** Everything one running grid needs: the shared clock (see bruit-kit's
- * stepClock.ts doc for why rows never own their own), the shared reverb
+ * stepClock.ts doc for why rows never own their own), the shared send
  * bus, the effects-chain cache, and the row/column config that
  * resolveCellConfig cascades through every tick. */
 export class GridModel {
   readonly clock: StepClock;
-  readonly reverb: ReverbEffect;
   readonly masterGain: GainNode;
   columns: ColumnConfig[];
   precedence: Precedence = "row";
@@ -179,6 +179,14 @@ export class GridModel {
   private masterChain: BuiltEffectsChain;
   private readonly masterDestination: AudioNode;
   private readonly chainCache: ReturnType<typeof createEffectsChainCache>;
+  /** Every row's own Send level (see RowConfig.sendLevel) taps a copy of
+   * that row's output into this fixed, never-reconnected node -- so
+   * rebuilding sendChain on setSendBusEffects only ever needs to touch
+   * this one connection (mirrors setMasterEffects' masterGain/masterChain
+   * pair), not every row's individual send tap. */
+  private readonly sendBusInput: GainNode;
+  private sendBusEffects: EffectSpec[] = [];
+  private sendChain: BuiltEffectsChain;
   private readonly rows: RowRuntime[] = [];
   private stepSeconds: number;
 
@@ -193,9 +201,9 @@ export class GridModel {
     this.clock = createStepClock(audioContext, () => this.stepSeconds);
     this.masterDestination = dryDestination;
 
-    // Master bus: every row's persistent chain and the shared reverb both
-    // feed into masterGain, so a single fader/effects chain here affects
-    // the whole mix, downstream of everything else.
+    // Master bus: every row's persistent chain and the shared send bus
+    // both feed into masterGain, so a single fader/effects chain here
+    // affects the whole mix, downstream of everything else.
     this.masterGain = audioContext.createGain();
     this.masterGain.gain.value = 1;
     this.masterChain = buildEffectsChain(audioContext, []);
@@ -203,9 +211,18 @@ export class GridModel {
     this.masterGain.connect(this.masterChain.input);
 
     this.chainCache = createEffectsChainCache(audioContext, this.masterGain);
-    this.reverb = new ReverbEffect(audioContext);
-    this.reverb.setParams({ wet: 1, decaySeconds: 2.2 });
-    this.reverb.output.connect(this.masterGain);
+
+    // The send bus: an arbitrary, user-configured effect chain (Master
+    // panel's "Send Bus" section) that every row can tap into by some
+    // amount via its own Send level, same shared-bus-many-taps shape a
+    // hardcoded reverb send used to be, generalized to any chain (or
+    // none) instead of a single fixed ReverbEffect.
+    this.sendBusInput = audioContext.createGain();
+    this.sendBusInput.gain.value = 1;
+    this.sendChain = buildEffectsChain(audioContext, []);
+    this.sendChain.output.connect(this.masterGain);
+    this.sendBusInput.connect(this.sendChain.input);
+
     this.columns = Array.from({ length: this.columnCount }, () =>
       createColumnConfig(),
     );
@@ -271,6 +288,23 @@ export class GridModel {
     return this.masterEffects;
   }
 
+  /** Same acquire-before-release-shaped rebuild as setMasterEffects, just
+   * re-pointing sendBusInput (every row's fixed tap target, see its own
+   * doc) at a fresh chain instead of masterGain. */
+  setSendBusEffects(effects: EffectSpec[]): void {
+    const newChain = buildEffectsChain(this.audioContext, effects);
+    newChain.output.connect(this.masterGain);
+    this.sendBusInput.disconnect();
+    this.sendBusInput.connect(newChain.input);
+    this.sendChain.dispose();
+    this.sendChain = newChain;
+    this.sendBusEffects = effects;
+  }
+
+  getSendBusEffects(): EffectSpec[] {
+    return this.sendBusEffects;
+  }
+
   getRows(): Row[] {
     return this.rows.map((r) => this.toRow(r));
   }
@@ -309,7 +343,7 @@ export class GridModel {
       envelopeOverride: false,
       envelope: createEnvelope(),
       effects: [],
-      reverbSend: 0,
+      sendLevel: 0,
       sampleRange: { start: 0, end: 1 },
       reversed: false,
     };
@@ -325,7 +359,7 @@ export class GridModel {
     source.output.connect(envelopeGain);
     const chain = this.chainCache.acquire(config.effects);
     envelopeGain.connect(chain.input);
-    const send = createSend(this.audioContext, this.reverb.input, 0);
+    const send = createSend(this.audioContext, this.sendBusInput, 0);
     chain.output.connect(send.input);
 
     const runtime: RowRuntime = {
@@ -452,11 +486,11 @@ export class GridModel {
     runtime.config = { ...runtime.config, envelope: { points } };
   }
 
-  setRowReverbSend(row: Row, level: number): void {
+  setRowSendLevel(row: Row, level: number): void {
     const runtime = this.findRuntime(row);
     if (!runtime) return;
     runtime.send.setLevel(level);
-    runtime.config = { ...runtime.config, reverbSend: level };
+    runtime.config = { ...runtime.config, sendLevel: level };
   }
 
   setRowSampleRange(row: Row, range: { start: number; end: number }): void {
@@ -503,8 +537,8 @@ export class GridModel {
     runtime.envelopeGain.connect(newChain.input);
     // Sever only the old chain's own edge into this row's send tap -- not
     // send.input.disconnect(), which would sever send.input's *outgoing*
-    // edge to the reverb bus instead and silently kill this row's reverb
-    // send for good (the old chain might still be shared with another
+    // edge to the send bus instead and silently kill this row's send
+    // for good (the old chain might still be shared with another
     // row, so a blanket oldChain.output.disconnect() isn't safe either).
     oldChain.output.disconnect(runtime.send.input);
     newChain.output.connect(runtime.send.input);

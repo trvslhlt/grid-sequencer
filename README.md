@@ -94,7 +94,11 @@ Library and applying it additively to a different row (see "Effect
 Library" below), the cell-level Effects and Envelope sections and their
 always-interactive-but-dimmed controls, a full multi-effect chain
 including Delay (Delay used to silence everything including the dry
-signal, since fixed), adding one row of each of the 5 source types
+signal, since fixed), the Master panel's two titled effect-chain
+sections (Effects, the insert chain; Send Bus, an arbitrary chain fed by
+each row's own Send level — adding a Reverb to it and confirming its
+decay/wet are live-adjustable and persist through save/reload, same as
+the rest of the master-level settings), adding one row of each of the 5 source types
 (GranularSynth exercises its async worklet init), the precedence toggle,
 tempo (BPM/subdivision), resizing the step count, patch persistence
 (saving under a name with the real overwrite-confirm flow, reloading the
@@ -210,6 +214,10 @@ make run-image-backend
     into `2^bits` discrete steps (bit-depth reduction only — no
     sample-rate reduction/aliasing, which needs an `AudioWorkletProcessor`
     bruit-kit doesn't provide for this effect yet).
+  - **Reverb** — decay, pre-delay, damping, wet. A synthesized decaying-
+    noise impulse response via a `ConvolverNode` — usable as an insert
+    here on any row/cell/master chain, or on the Master panel's own
+    **Send Bus** (see below), same as everywhere else.
 
   Once a chain has at least one effect, **Save chain as preset…** saves
   the whole ordered list to the **Effect Library** (see below) for reuse
@@ -280,18 +288,29 @@ make run-image-backend
 - **Steps** (top bar): the number of columns, adjustable at any time —
   growing keeps existing columns' data and pads with fresh ones; shrinking
   drops the trailing columns.
-- **Master** panel: master gain, the same modular effects chain as a
-  row's (see above, no default chain here either), the limiter's ceiling/
-  release (the limiter itself is always on — a brickwall safety net
-  before the audio device, see `audioContext.ts` — this just exposes its
-  two params), and the shared reverb bus's own decay/pre-delay/damping.
-  The reverb bus is a parallel send (every row's own "Reverb send" field
-  controls how much of that row reaches it at all), always fully wet, so
-  only its character is exposed here, not a redundant wet control.
+- **Master** panel: master gain, the limiter's ceiling/release (the
+  limiter itself is always on — a brickwall safety net before the audio
+  device, see `audioContext.ts` — this just exposes its two params), and
+  two titled effect-chain sections:
+  - **Effects** — the master bus's own insert chain: applies to the
+    whole mix, downstream of every row, same modular add/remove chain as
+    a row's (no default chain here either).
+  - **Send Bus** — a *separate*, arbitrary chain fed by a parallel tap:
+    every row has its own **Send** field (0–1) controlling how much of
+    that row's output reaches this chain, same "send some amount to a
+    shared bus" shape a mixing console's aux sends use. This used to be
+    a single hardcoded reverb bus with dedicated decay/pre-delay/damping
+    sliders; now the chain itself is empty by default and holds whatever
+    effects you add to it, including **Reverb** — now just another entry
+    in the same effect-type list as Filter/Delay/Chorus/etc., with its
+    own decay/pre-delay/damping/wet — but just as easily a Delay, a
+    Chorus, several effects stacked, or nothing at all. The demo patch
+    seeds this chain with a Reverb so it still sounds the way this app's
+    demo always has.
 - **Add row**: pick a source type (sample player, oscillator, FM, noise,
   or granular synth) and a name, then **Add row**. Granular-synth rows
   take a moment to initialize (loads an `AudioWorklet`). Source type is
-  fixed at creation; everything else (trigger mode, defaults, reverb send,
+  fixed at creation; everything else (trigger mode, defaults, send level,
   effect chain, per-source-type params like waveform or grain density)
   lives in that row's panel. A row's "Duration (steps)" field (shown when
   its trigger mode is "Explicit duration") is a count of grid steps, not

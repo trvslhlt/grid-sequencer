@@ -37,7 +37,11 @@ import {
 } from "./patchApi";
 import { generateBlipBuffer } from "./sampleGen";
 import { type Field, renderFields } from "./ui/fields";
-import { createGridView, effectsFields } from "./ui/gridView";
+import {
+  type PanelSection,
+  createGridView,
+  effectsFields,
+} from "./ui/gridView";
 import { type TreeGroup, renderLibraryTree } from "./ui/libraryTree";
 import { encodeWav } from "./wavEncoder";
 
@@ -175,14 +179,6 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
   // rebuilds rather than resetting the sliders to a hardcoded default.
   let limiterCeiling = -1;
   let limiterRelease = 0.1;
-  // Same reasoning, for the shared reverb bus -- ReverbEffect has no
-  // getter either. Matches model.reverb's own construction call
-  // (`setParams({ wet: 1, decaySeconds: 2.2 })`) plus ReverbEffect's own
-  // constructor defaults for preDelay/damping (never set explicitly at
-  // construction, so they start at the class's own 20ms/6000Hz).
-  let reverbDecaySeconds = 2.2;
-  let reverbPreDelayMs = 20;
-  let reverbDampingHz = 6000;
 
   function buildMasterFields(): Field[] {
     return [
@@ -196,16 +192,6 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
         step: 0.01,
         onChange: (v) => model.setMasterGain(v),
       },
-      ...effectsFields(
-        () => model.getMasterEffects(),
-        // See gridView.ts's own row/cell effectsFields callers for why
-        // this needs an explicit render, not just the model update.
-        (next) => {
-          model.setMasterEffects(next);
-          view.render();
-        },
-        saveEffectChainPreset,
-      ),
       {
         key: "limiterCeiling",
         label: "Limiter ceiling (dB)",
@@ -232,50 +218,45 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
           limiter.setParams({ release: v });
         },
       },
-      // The shared reverb bus's own character -- distinct from a row's
-      // "Reverb send" (how much of that row reaches this bus at all).
-      // wet isn't exposed here: model.reverb is a parallel send bus, not
-      // an insert, so it's always fully wet (see gridModel.ts's own
-      // construction call) -- exposing wet here too would just duplicate
-      // what each row's send level already controls, more confusingly.
+    ];
+  }
+
+  // Two distinct chains, both live in the Master panel -- kept as titled
+  // sections (see gridView.ts's PanelSection) rather than one flat field
+  // list, so it's never ambiguous which chain a given "Add effect…"
+  // block belongs to. "Effects" is the master bus's own insert chain
+  // (applies to the whole mix, downstream of every row); "Send Bus" is
+  // an arbitrary chain fed by each row's own Send level (see
+  // config.ts's RowConfig.sendLevel) -- this used to be a single
+  // hardcoded ReverbEffect with dedicated decay/pre-delay/damping/wet
+  // sliders; now it's just another modular chain, and Reverb is one of
+  // the effect types available to add to it (or to any row/cell/master
+  // insert chain, via the same EFFECT_TABLE entry).
+  function buildMasterSections(): PanelSection[] {
+    return [
       {
-        key: "reverbDecaySeconds",
-        label: "Reverb decay (s)",
-        kind: "range",
-        value: reverbDecaySeconds,
-        min: 0.1,
-        max: 8,
-        step: 0.1,
-        onChange: (v) => {
-          reverbDecaySeconds = v;
-          model.reverb.setParams({ decaySeconds: v });
-        },
+        title: "Effects",
+        fields: effectsFields(
+          () => model.getMasterEffects(),
+          // See gridView.ts's own row/cell effectsFields callers for why
+          // this needs an explicit render, not just the model update.
+          (next) => {
+            model.setMasterEffects(next);
+            view.render();
+          },
+          saveEffectChainPreset,
+        ),
       },
       {
-        key: "reverbPreDelayMs",
-        label: "Reverb pre-delay (ms)",
-        kind: "range",
-        value: reverbPreDelayMs,
-        min: 0,
-        max: 200,
-        step: 1,
-        onChange: (v) => {
-          reverbPreDelayMs = v;
-          model.reverb.setParams({ preDelayMs: v });
-        },
-      },
-      {
-        key: "reverbDampingHz",
-        label: "Reverb damping (Hz)",
-        kind: "range",
-        value: reverbDampingHz,
-        min: 500,
-        max: 12000,
-        step: 100,
-        onChange: (v) => {
-          reverbDampingHz = v;
-          model.reverb.setParams({ dampingHz: v });
-        },
+        title: "Send Bus",
+        fields: effectsFields(
+          () => model.getSendBusEffects(),
+          (next) => {
+            model.setSendBusEffects(next);
+            view.render();
+          },
+          saveEffectChainPreset,
+        ),
       },
     ];
   }
@@ -319,6 +300,7 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
 
   const view = createGridView(gridEl, model, {
     buildMasterFields,
+    buildMasterSections,
     getCurrentSampleName: (row) => {
       const id = rowSampleIds.get(row.id);
       return availableSamples.find((s) => s.id === id)?.name;
@@ -852,9 +834,6 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
       subdivision: Number(subdivisionEl.value),
       limiterCeiling,
       limiterRelease,
-      reverbDecaySeconds,
-      reverbPreDelayMs,
-      reverbDampingHz,
     };
   }
 
@@ -864,14 +843,6 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
     limiterCeiling = state.limiterCeiling;
     limiterRelease = state.limiterRelease;
     limiter.setParams({ ceiling: limiterCeiling, release: limiterRelease });
-    reverbDecaySeconds = state.reverbDecaySeconds;
-    reverbPreDelayMs = state.reverbPreDelayMs;
-    reverbDampingHz = state.reverbDampingHz;
-    model.reverb.setParams({
-      decaySeconds: reverbDecaySeconds,
-      preDelayMs: reverbPreDelayMs,
-      dampingHz: reverbDampingHz,
-    });
     model.setStepSeconds(computeStepSeconds());
   }
 
@@ -970,15 +941,28 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
       false,
       false,
     ]);
-    // A long, loose hold (most of the 8-step cycle) plus a healthy reverb
-    // send -- granular texture reads as atmosphere, not another hit in the
-    // groove, so it's the one row deliberately not locked to the beat.
+    // A long, loose hold (most of the 8-step cycle) plus a healthy send
+    // to the (now Reverb-loaded, see below) send bus -- granular texture
+    // reads as atmosphere, not another hit in the groove, so it's the one
+    // row deliberately not locked to the beat.
     model.setRowTriggerMode(padRow, {
       kind: "explicitDuration",
       steps: 6,
       loop: false,
     });
-    model.setRowReverbSend(padRow, 0.4);
+    model.setRowSendLevel(padRow, 0.4);
+
+    // The send bus itself holds nothing by default now (see
+    // GridModel.setSendBusEffects's doc) -- Pad's own send level above is
+    // inert without an effect actually in this chain, so the demo adds a
+    // Reverb here explicitly, matching the values this app used to hard-
+    // code for the bus itself before it became a modular chain.
+    model.setSendBusEffects([
+      {
+        type: "reverb",
+        params: { decaySeconds: 2.2, preDelayMs: 20, dampingHz: 6000, wet: 1 },
+      },
+    ]);
 
     // Kick and Pad both auto-loaded a placeholder blip in addRow (see its
     // needsSample check) -- upload both so they round-trip through the

@@ -8,6 +8,7 @@ import {
   FilterEffect,
   FlangerEffect,
   PhaserEffect,
+  ReverbEffect,
   RingModulationEffect,
   TremoloEffect,
   chainEffects,
@@ -80,6 +81,11 @@ function instantiateEffect(
     }
     case "bitcrusher": {
       const fx = new BitcrusherEffect(audioContext);
+      fx.setParams({ wet: 1, ...spec.params });
+      return fx;
+    }
+    case "reverb": {
+      const fx = new ReverbEffect(audioContext);
       fx.setParams({ wet: 1, ...spec.params });
       return fx;
     }

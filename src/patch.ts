@@ -25,9 +25,6 @@ export interface TempoState {
   subdivision: number;
   limiterCeiling: number;
   limiterRelease: number;
-  reverbDecaySeconds: number;
-  reverbPreDelayMs: number;
-  reverbDampingHz: number;
 }
 
 export function serializePatch(
@@ -45,11 +42,9 @@ export function serializePatch(
     columns: model.columns,
     masterGain: model.masterGain.gain.value,
     masterEffects: model.getMasterEffects(),
+    sendBusEffects: model.getSendBusEffects(),
     limiterCeiling: tempoState.limiterCeiling,
     limiterRelease: tempoState.limiterRelease,
-    reverbDecaySeconds: tempoState.reverbDecaySeconds,
-    reverbPreDelayMs: tempoState.reverbPreDelayMs,
-    reverbDampingHz: tempoState.reverbDampingHz,
     rows: model.getRows().map((row) => ({
       name: row.config.name,
       sourceType: row.config.sourceType,
@@ -63,7 +58,7 @@ export function serializePatch(
       envelopeOverride: row.config.envelopeOverride,
       envelope: row.config.envelope,
       effects: row.config.effects,
-      reverbSend: row.config.reverbSend,
+      sendLevel: row.config.sendLevel,
       sampleRange: row.config.sampleRange,
       reversed: row.config.reversed,
       sourceParams: row.source.getParams(),
@@ -104,21 +99,16 @@ export async function applyPatch(
 
   model.setMasterGain(patch.masterGain);
   model.setMasterEffects(patch.masterEffects as EffectSpec[]);
+  // ?? fallback: patches saved before the send bus was generalized from a
+  // hardcoded reverb have no such key at all -- an empty chain (silent
+  // send bus) is the correct fallback, not a migration system.
+  model.setSendBusEffects((patch.sendBusEffects as EffectSpec[]) ?? []);
 
   return {
     bpm: patch.bpm,
     subdivision: patch.subdivision,
     limiterCeiling: patch.limiterCeiling,
     limiterRelease: patch.limiterRelease,
-    // ?? fallback: patches saved before these fields existed have no such
-    // key -- falling back to undefined here would make the master panel's
-    // sliders render `value: undefined` (NaN), not just silently keep an
-    // old setting, so this is a correctness fallback, not a migration
-    // system (see GridModel's own reverb.setParams call for these same
-    // numbers).
-    reverbDecaySeconds: patch.reverbDecaySeconds ?? 2.2,
-    reverbPreDelayMs: patch.reverbPreDelayMs ?? 20,
-    reverbDampingHz: patch.reverbDampingHz ?? 6000,
   };
 }
 
@@ -148,7 +138,7 @@ async function addPatchRow(
   if (patchRow.envelopeOverride) model.setRowEnvelopeOverride(row, true);
   model.setRowEnvelope(row, (patchRow.envelope as EnvelopeParams).points);
   model.setRowEffects(row, patchRow.effects as EffectSpec[]);
-  model.setRowReverbSend(row, patchRow.reverbSend);
+  model.setRowSendLevel(row, patchRow.sendLevel);
   row.source.setParams(patchRow.sourceParams);
 
   if (patchRow.sampleId && row.source.needsSample) {

@@ -19,7 +19,7 @@ export interface PatchRow {
   envelopeOverride: boolean;
   envelope: unknown;
   effects: unknown[];
-  reverbSend: number;
+  sendLevel: number;
   sampleRange: { start: number; end: number };
   reversed: boolean;
   sourceParams: Record<string, unknown>;
@@ -50,11 +50,9 @@ export interface Patch extends PatchSummary {
   columns: unknown[];
   masterGain: number;
   masterEffects: unknown[];
+  sendBusEffects: unknown[];
   limiterCeiling: number;
   limiterRelease: number;
-  reverbDecaySeconds: number;
-  reverbPreDelayMs: number;
-  reverbDampingHz: number;
   rows: PatchRow[];
 }
 
