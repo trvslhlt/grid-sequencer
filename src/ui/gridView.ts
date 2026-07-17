@@ -789,6 +789,11 @@ export interface GridViewHandle {
    * effects chain), and for a cell selection on a non-samplePlayer row
    * (cell effect overrides only exist for sample rows, see cellPanel). */
   getSelectedEffectsTarget(): {
+    /** Same wording as the panel's own title ("Row: Kick", "Cell: Kick ×
+     * col 5", "Master") -- so a caller confirming an action against this
+     * target (e.g. the Effect Library's replace/add prompt) can name it
+     * without re-deriving that format itself. */
+    label: string;
     getEffects: () => EffectSpec[];
     setEffects: (next: EffectSpec[]) => void;
   } | null;
@@ -814,6 +819,7 @@ export function createGridView(
   }
 
   function getSelectedEffectsTarget(): {
+    label: string;
     getEffects: () => EffectSpec[];
     setEffects: (next: EffectSpec[]) => void;
   } | null {
@@ -821,6 +827,7 @@ export function createGridView(
       const row = model.getRow(selection.rowId);
       if (!row) return null;
       return {
+        label: `Row: ${row.config.name}`,
         getEffects: () => model.getRow(row.id)?.config.effects ?? [],
         setEffects: (next) => model.setRowEffects(row, next),
       };
@@ -830,6 +837,7 @@ export function createGridView(
       if (!row || row.config.sourceType !== "samplePlayer") return null;
       const columnIndex = selection.columnIndex;
       return {
+        label: `Cell: ${row.config.name} × col ${columnIndex + 1}`,
         getEffects: () => row.cells[columnIndex]?.effects ?? [],
         setEffects: (next) => {
           // Applying a chain preset to a cell whose own override is off
@@ -846,6 +854,7 @@ export function createGridView(
     }
     if (selection?.kind === "master") {
       return {
+        label: "Master",
         getEffects: () => model.getMasterEffects(),
         setEffects: (next) => model.setMasterEffects(next),
       };

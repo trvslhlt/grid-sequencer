@@ -20,8 +20,10 @@
 // instances of the same type, e.g. two delays) and *every* one of each
 // type's own params, including ones added after an "expose all available
 // params" pass (filter gain, compressor knee, tremolo/ring-mod's full
-// non-custom waveform set), the Effect Library (save a whole configured chain,
-// apply it additively to a different row/cell/master) -- FmSynth's and
+// non-custom waveform set), the Effect Library (save a whole configured
+// chain, apply it to an empty target directly, or -- when the target
+// already has effects -- a confirm/confirm replace-or-add-or-cancel
+// flow instead of silently always appending) -- FmSynth's and
 // GranularSynth's own
 // previously-under-exposed params (carrier/modulator waveform; every grain
 // param, not just density/pitch-jitter), the Master panel's two titled
@@ -600,6 +602,26 @@ async function expandGroup(containerSelector, label) {
   await page.waitForTimeout(80);
 }
 
+/** For a caller about to trigger two or more *synchronous, back-to-back*
+ * window.confirm() calls in a row (see the Effect Library preset-apply
+ * flow's replace/add/cancel prompts) -- registering multiple page.once()
+ * handlers ahead of time does NOT reliably assign one handler per dialog
+ * in order; Playwright can invoke more than one of them against the same
+ * first dialog, throwing "Cannot dismiss dialog which is already
+ * handled" on the second. A single persistent handler that shifts one
+ * planned response off a queue per dialog is the reliable way to script
+ * a known sequence. */
+function respondToDialogs(responses) {
+  const queue = [...responses];
+  async function handler(dialog) {
+    const next = queue.shift();
+    if (next === "accept") await dialog.accept();
+    else await dialog.dismiss();
+    if (queue.length === 0) page.off("dialog", handler);
+  }
+  page.on("dialog", handler);
+}
+
 await expandGroup("#sample-library", "percussion");
 const percussionSamples = page.locator(
   "#sample-library .library-tree-item button",
@@ -1006,8 +1028,59 @@ if ((await removeEffectButton(rowPanel, "Delay").count()) === 0) {
   );
 } else {
   ok(
-    "applying an Effect Library preset appends the whole saved chain onto a different row",
+    "applying an Effect Library preset onto an empty target applies it directly, no dialogs",
   );
+}
+
+// Applying to a target that already has effects asks first -- a plain
+// confirm() only has two distinguishable outcomes, which can't represent
+// replace/add/cancel without one of them silently double-booking as
+// "cancel," so this is two separate confirms: "apply at all?" (a real
+// cancel path that changes nothing), then "replace or add?".
+const chainButtonCount = () =>
+  rowPanel.locator("button", { hasText: /— Remove$/ }).count();
+const countBeforeCancel = await chainButtonCount();
+page.once("dialog", (dialog) => dialog.dismiss());
+await page
+  .locator("#effect-library .library-tree-item button", {
+    hasText: "Verify Chain",
+  })
+  .click();
+await page.waitForTimeout(300);
+if ((await chainButtonCount()) !== countBeforeCancel) {
+  fail("cancelling the first apply-preset confirm should make no change");
+} else {
+  ok("cancelling the first apply-preset confirm leaves the chain untouched");
+}
+
+respondToDialogs(["accept", "dismiss"]); // "apply at all?" then "replace?" -> Cancel means add
+await page
+  .locator("#effect-library .library-tree-item button", {
+    hasText: "Verify Chain",
+  })
+  .click();
+await page.waitForTimeout(300);
+if ((await chainButtonCount()) !== countBeforeCancel * 2) {
+  fail(
+    `choosing "add" should double the chain length: expected ${countBeforeCancel * 2}, got ${await chainButtonCount()}`,
+  );
+} else {
+  ok('choosing "add" appends the preset onto the existing chain');
+}
+
+respondToDialogs(["accept", "accept"]); // "apply at all?" then "replace?" -> OK means replace
+await page
+  .locator("#effect-library .library-tree-item button", {
+    hasText: "Verify Chain",
+  })
+  .click();
+await page.waitForTimeout(300);
+if ((await chainButtonCount()) !== countBeforeCancel) {
+  fail(
+    `choosing "replace" should reset the chain back to just the preset's own length: expected ${countBeforeCancel}, got ${await chainButtonCount()}`,
+  );
+} else {
+  ok('choosing "replace" resets the chain to just the applied preset');
 }
 
 // Global key/scale: a quantization constraint above the note cascade

@@ -793,12 +793,32 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
               setTimeout(() => hint.remove(), 2000);
               return;
             }
-            // Additive, not a replace -- "effects as needed," matching
-            // the same append-only philosophy as "+ Add effect" itself.
-            target.setEffects([
-              ...target.getEffects(),
-              ...(preset.effects as EffectSpec[]),
-            ]);
+            const current = target.getEffects();
+            const incoming = preset.effects as EffectSpec[];
+            if (current.length === 0) {
+              // Nothing to replace or merge with -- apply directly, same
+              // as clicking a sample/instrument preset onto an empty slot.
+              target.setEffects(incoming);
+              view.render();
+              renderLibraryPanels();
+              return;
+            }
+            // Two separate confirms, not one -- a single confirm() only
+            // has two distinguishable outcomes (OK/Cancel), which can't
+            // represent three choices (replace/add/cancel) without one of
+            // them silently double-booking as "cancel." This keeps a real
+            // cancel path that does nothing, distinct from choosing add.
+            if (
+              !window.confirm(
+                `Apply "${preset.name}" to ${target.label}? It already has ${current.length} effect${current.length === 1 ? "" : "s"}.`,
+              )
+            ) {
+              return;
+            }
+            const replace = window.confirm(
+              `Replace ${target.label}'s existing chain with "${preset.name}"?\n\nOK: replace it entirely.\nCancel: add "${preset.name}" on top of what's already there instead.`,
+            );
+            target.setEffects(replace ? incoming : [...current, ...incoming]);
             view.render();
             renderLibraryPanels();
           });

@@ -90,8 +90,9 @@ confirming that instance's own full param list appears; adding a duplicate type 
 removing just one instance; dragging a param's value with no render call
 missed in between — a stale-closure regression that used to silently
 drop the change, since fixed), saving a configured chain to the Effect
-Library and applying it additively to a different row (see "Effect
-Library" below), the cell-level Effects and Envelope sections and their
+Library and applying it to a different row -- directly onto an empty
+target, or through the replace/add/cancel confirm flow onto a non-empty
+one (see "Effect Library" below), the cell-level Effects and Envelope sections and their
 always-interactive-but-dimmed controls, a full multi-effect chain
 including Delay (Delay used to silence everything including the dry
 signal, since fixed), the Master panel's two titled effect-chain
@@ -340,11 +341,16 @@ make run-image-backend
   "Save chain as preset…"). Unlike an instrument preset, an effect chain
   preset has no compatibility gating — it applies to a row, a sample
   cell (auto-enabling that cell's own effects override), or Master alike,
-  since nothing about an effect chain ties it to a source type. Clicking
-  a saved chain **appends** its effects onto whatever's currently
-  selected (additive, not a replace, matching "add effects as needed");
-  with nothing selected, it hints to pick a target first, same as the
-  other two panels.
+  since nothing about an effect chain ties it to a source type. With
+  nothing selected, clicking a saved chain hints to pick a target first.
+  Otherwise, what happens depends on whether the target already has
+  effects: an **empty** target gets the chain applied directly, no
+  prompt. A **non-empty** target asks first — confirm to proceed at all
+  (Cancel leaves it untouched), then a second confirm chooses **replace**
+  (OK — wipes the existing chain) or **add** (Cancel — appends onto what's
+  already there). Two separate confirms rather than one, since a single
+  yes/no dialog can't represent three distinct outcomes without one of
+  them silently doubling up as "cancel."
 - **Manage Library page** (top bar, in-app toggle — not a separate URL):
   full CRUD for all three libraries. Samples: rename, re-categorize
   (moves it between the tree's groups), delete, or add a brand-new local
