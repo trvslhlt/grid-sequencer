@@ -1,6 +1,6 @@
 .PHONY: up down restart logs shell lint format typecheck build-image run-image verify \
 	bruit-kit-build backend-logs backend-shell backend-typecheck build-image-backend run-image-backend \
-	seed-samples
+	seed-samples seed-base-samples
 
 # bruit-kit is bind-mounted read-only into this project's dev container
 # (see docker-compose.yml) rather than copied in, so its own Docker setup
@@ -59,6 +59,14 @@ verify:
 # (each run just adds another copy, see scripts/seed-sample-library.mjs).
 seed-samples:
 	node scripts/seed-sample-library.mjs
+
+# Uploads real, git-tracked audio files from assets/base-samples/ (see
+# its own README) -- unlike seed-samples' procedurally synthesized set,
+# these survive a `rm -rf backend/samples` dev/test reset the same way
+# any other source file does; safe to run repeatedly, skips anything
+# already present by name+category instead of piling up duplicates.
+seed-base-samples:
+	node scripts/seed-base-samples.mjs
 
 # --- backend equivalents ---
 

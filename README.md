@@ -334,7 +334,15 @@ make run-image-backend
   two pads, and three fx sweeps) — see `scripts/seed-sample-library.mjs`,
   a standalone Node script (no browser, no npm deps) that synthesizes raw
   PCM by hand and uploads it the same way the management page's own
-  "+ Add sample" would.
+  "+ Add sample" would. `make seed-base-samples` does the same for real,
+  hand-picked audio files instead of synthesized ones — see
+  `assets/base-samples/`'s own README for the folder-per-category
+  convention. Unlike everything else in `backend/samples/` (gitignored,
+  wiped by any `rm -rf backend/samples` dev/test reset), these source
+  files are git-tracked, so they survive a reset the same way any other
+  source file does; re-running the seed script just re-populates the
+  library from them (idempotent by name+category, unlike
+  `seed-samples`'s own "each run adds another copy" set).
 - **Effect Library panel** (right column, third stacked panel): the same
   select-only, collapsible-tree shape as the Sample/Instrument panels
   above, but for whole saved effect chains (see the Effects bullet's
@@ -516,6 +524,11 @@ tests/
   verify.mjs              manual Playwright golden-path check (make verify)
 scripts/
   seed-sample-library.mjs synthesizes + uploads a varied sample library (make seed-samples)
+  seed-base-samples.mjs   uploads assets/base-samples/'s real, git-tracked audio
+                            files (make seed-base-samples), idempotent by name+category
+assets/
+  base-samples/            git-tracked source audio, survives backend/samples/ resets --
+                             see its own README for the folder-per-category convention
 Dockerfile                dev / bruit-kit-dist / build / runtime stages (frontend)
 backend/Dockerfile         dev / build / runtime stages (backend, independent context)
 docker-compose.yml         app + backend dev containers + the verify service's container
