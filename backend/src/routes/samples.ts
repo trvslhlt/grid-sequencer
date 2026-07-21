@@ -6,6 +6,7 @@ import {
   deleteSample,
   findSampleFile,
   listSamples,
+  replaceSampleAudio,
   reverseSampleAudio,
   updateSampleMetadata,
   writeSample,
@@ -80,6 +81,27 @@ samplesRouter.patch("/:id", async (req, res) => {
     category:
       typeof req.body.category === "string" ? req.body.category : undefined,
   });
+  if (!updated) {
+    res.status(404).json({ error: "Sample not found" });
+    return;
+  }
+  res.json(updated);
+});
+
+// Overwrites a sample's stored audio with client-computed bytes (the
+// sample editor popup's trim/reverse preview, encoded to WAV before it
+// gets here) -- keeps the same id, so rows/patches referencing it pick up
+// the new audio next time they assign/load it, same as reverseSampleAudio.
+samplesRouter.put("/:id/audio", upload.single("audio"), async (req, res) => {
+  if (!req.file) {
+    res.status(400).json({ error: "Missing audio file" });
+    return;
+  }
+  const updated = await replaceSampleAudio(
+    req.params.id,
+    req.file.buffer,
+    req.file.mimetype,
+  );
   if (!updated) {
     res.status(404).json({ error: "Sample not found" });
     return;

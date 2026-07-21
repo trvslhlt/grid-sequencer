@@ -130,6 +130,34 @@ export async function deleteSample(id: string): Promise<boolean> {
   return true;
 }
 
+/** Replaces a sample's own stored audio bytes in place, same id/filename --
+ * unlike reverseSampleAudio (which mutates the file this store already
+ * holds), this swaps in bytes the caller computed itself (e.g. the sample
+ * editor popup's trim/reverse preview, encoded client-side). mimeType is
+ * updated too in case it changes, though every upload path in this app
+ * always sends WAV (see wavEncoder.ts), so in practice it never does. */
+export async function replaceSampleAudio(
+  id: string,
+  data: Buffer,
+  mimeType: string,
+): Promise<SampleMetadata | null> {
+  const sidecar = await readSidecar(id);
+  if (!sidecar) return null;
+  await fs.writeFile(path.join(SAMPLES_DIR, sidecar.filename), data);
+  const updated: Sidecar = { ...sidecar, mimeType };
+  await fs.writeFile(
+    path.join(SAMPLES_DIR, `${id}.json`),
+    JSON.stringify(updated, null, 2),
+  );
+  return {
+    id,
+    name: updated.name,
+    mimeType: updated.mimeType,
+    createdAt: updated.createdAt,
+    category: updated.category ?? "uncategorized",
+  };
+}
+
 /** Reverses a WAV file's own `data` chunk in place, one whole frame
  * (all channels' sample for a given instant) at a time so a swap never
  * splits a frame across channels -- every sample this app ever stores is

@@ -12,8 +12,65 @@ body {
   font-size: 0.9rem;
 }
 
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.app-header-left {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.app-header h1 {
+  margin: 0;
+}
+
+/* Green + play glyph when stopped (click starts), red + stop glyph while
+ * playing (click stops) -- one button standing in for the old separate
+ * Play/Stop pair, its own color carrying the state instead of a label. */
+.play-stop-button {
+  flex-shrink: 0;
+  width: 2.75rem;
+  height: 2.75rem;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.1rem;
+  line-height: 1;
+  color: #fff;
+  background: #2ea043;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+.play-stop-button:hover:not(:disabled) {
+  filter: brightness(1.1);
+}
+
+.play-stop-button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.play-stop-button.is-playing {
+  background: #e5484d;
+}
+
+/* !important: elements toggled by this class often also carry their own
+ * id/class display rule (e.g. #library-management-view's display: flex,
+ * .sequencer-transport's display: flex) -- without it, a same-or-higher
+ * specificity rule declared later in this file (or an id selector, which
+ * always outranks a class) would win the cascade and the element would
+ * stay visibly laid out despite having "hidden" applied. */
 .hidden {
-  display: none;
+  display: none !important;
 }
 
 .transport {
@@ -22,6 +79,13 @@ body {
   gap: 1.5rem;
   flex-wrap: wrap;
   margin-bottom: 1.5rem;
+}
+
+.sequencer-transport {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  flex-wrap: wrap;
 }
 
 button {
@@ -462,4 +526,83 @@ input:disabled {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+}
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 11, 13, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  padding: 1rem;
+}
+
+.modal {
+  background: #1c1e24;
+  border: 1px solid #3a3e47;
+  border-radius: 8px;
+  padding: 1rem;
+  width: 100%;
+  max-width: 620px;
+  max-height: 90vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  border-bottom: 1px solid #2a2d34;
+  padding-bottom: 0.5rem;
+}
+
+.modal-title {
+  font-weight: 600;
+  font-size: 1rem;
+  color: #ffb454;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.modal-close-button {
+  flex-shrink: 0;
+  line-height: 1;
+  padding: 0.2rem 0.55rem;
+}
+
+.modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  border-top: 1px solid #2a2d34;
+  padding-top: 0.75rem;
+}
+
+.modal-destructive-button {
+  margin-right: auto;
+}
+
+.sample-editor-waveform {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.sample-editor-controls {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  font-size: 0.85rem;
 }

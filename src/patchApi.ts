@@ -153,6 +153,25 @@ export async function fetchSampleAudio(id: string): Promise<ArrayBuffer> {
   return response.arrayBuffer();
 }
 
+/** Overwrites a sample's stored audio in place (same id) -- used by the
+ * sample editor popup's "Overwrite" save path, distinct from uploadSample
+ * (which always mints a new id). `buffer` is whatever the popup computed
+ * from trim/reverse edits, encoded to WAV here the same way uploadSample
+ * does. */
+export async function replaceSampleAudio(
+  id: string,
+  buffer: AudioBuffer,
+): Promise<SampleMetadata> {
+  const formData = new FormData();
+  formData.append("audio", encodeWav(buffer), "audio.wav");
+  const response = await fetch(`/api/samples/${id}/audio`, {
+    method: "PUT",
+    body: formData,
+  });
+  if (!response.ok) throw new Error(`Failed to replace sample ${id} audio`);
+  return response.json();
+}
+
 export async function updateSample(
   id: string,
   patch: { name?: string; category?: string },

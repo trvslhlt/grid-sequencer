@@ -28,7 +28,7 @@ import {
   listPatches,
   listSamples,
   loadPatch,
-  reverseSample,
+  replaceSampleAudio,
   savePatch,
   updateEffectChainPreset,
   updateInstrumentPreset,
@@ -43,6 +43,7 @@ import {
   effectsFields,
 } from "./ui/gridView";
 import { type TreeGroup, renderLibraryTree } from "./ui/libraryTree";
+import { openSampleEditorModal } from "./ui/sampleEditorModal";
 import { encodeWav } from "./wavEncoder";
 
 const DEMO_PATCH_NAME = "demo";
@@ -63,8 +64,9 @@ const SUBDIVISIONS: Array<{ label: string; value: number }> = [
 const unlockEl = document.querySelector<HTMLDivElement>("#unlock")!;
 const appEl = document.querySelector<HTMLDivElement>("#app")!;
 const gridEl = document.querySelector<HTMLDivElement>("#grid")!;
-const playButtonEl = document.querySelector<HTMLButtonElement>("#play-button")!;
-const stopButtonEl = document.querySelector<HTMLButtonElement>("#stop-button")!;
+const playStopButtonEl = document.querySelector<HTMLButtonElement>(
+  "#play-stop-button",
+)!;
 const masterButtonEl =
   document.querySelector<HTMLButtonElement>("#master-button")!;
 const manageLibraryButtonEl = document.querySelector<HTMLButtonElement>(
@@ -72,6 +74,9 @@ const manageLibraryButtonEl = document.querySelector<HTMLButtonElement>(
 )!;
 const sequencerViewEl =
   document.querySelector<HTMLDivElement>("#sequencer-view")!;
+const sequencerTransportEl = document.querySelector<HTMLDivElement>(
+  "#sequencer-transport",
+)!;
 const libraryManagementViewEl = document.querySelector<HTMLDivElement>(
   "#library-management-view",
 )!;
@@ -172,6 +177,26 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
     INITIAL_COLUMN_COUNT,
     computeStepSeconds(),
   );
+
+  // Single circular button standing in for the old separate Play/Stop pair
+  // -- its own color/icon carry the state (green ▶ stopped, red ■
+  // playing) rather than a pair of always-visible labeled buttons. Lives
+  // in the page header (see index.html's .app-header, outside #app), so
+  // it's disabled until unlock resolves and there's a clock to drive.
+  function updatePlayStopButton(): void {
+    const playing = model.clock.isPlaying();
+    playStopButtonEl.classList.toggle("is-playing", playing);
+    playStopButtonEl.textContent = playing ? "■" : "▶";
+    playStopButtonEl.setAttribute("aria-label", playing ? "Stop" : "Play");
+  }
+  playStopButtonEl.disabled = false;
+  manageLibraryButtonEl.disabled = false;
+  playStopButtonEl.addEventListener("click", () => {
+    if (model.clock.isPlaying()) model.clock.stop();
+    else model.clock.start();
+    updatePlayStopButton();
+  });
+  updatePlayStopButton();
 
   // LimiterEffect has no getter for its own params (setParams only), so
   // this app tracks the current values itself -- matching its constructor
@@ -504,83 +529,41 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
         items: availableSamples.filter((s) => s.category === category),
       }),
     );
+    // A single click-to-open row per sample -- no rename/category/reverse/
+    // delete controls repeated on every row any more (see
+    // ui/sampleEditorModal.ts's doc comment); all of that now lives in the
+    // popup opened here, alongside non-destructive trim/reverse preview.
     renderLibraryTree(sampleManagementEl, sampleGroups, {
       getId: (s) => s.id,
       emptyMessage: "No samples in the library yet.",
       renderItem: (sample, itemEl) => {
-        itemEl.classList.add("management-row");
-
-        const nameEl = document.createElement("span");
-        nameEl.className = "name";
-        nameEl.textContent = sample.name;
-        itemEl.appendChild(nameEl);
-
-        const categorySelect = document.createElement("select");
-        for (const category of SAMPLE_CATEGORIES) {
-          const option = document.createElement("option");
-          option.value = category;
-          option.textContent = category;
-          option.selected = category === sample.category;
-          categorySelect.appendChild(option);
-        }
-        categorySelect.addEventListener("change", async () => {
-          await updateSample(sample.id, { category: categorySelect.value });
-          await refreshAvailableSamples();
-          renderManagementPage();
-          renderLibraryPanels();
+        const button = document.createElement("button");
+        button.textContent = sample.name;
+        button.addEventListener("click", () => {
+          openSampleEditorModal(sample, audioContext, SAMPLE_CATEGORIES, {
+            fetchAudio: fetchSampleAudio,
+            onOverwrite: async (target, buffer, meta) => {
+              await replaceSampleAudio(target.id, buffer);
+              await updateSample(target.id, meta);
+              await refreshAvailableSamples();
+              renderManagementPage();
+              renderLibraryPanels();
+            },
+            onSaveAsNew: async (buffer, meta) => {
+              await uploadSample(buffer, meta.name, meta.category);
+              await refreshAvailableSamples();
+              renderManagementPage();
+              renderLibraryPanels();
+            },
+            onDelete: async (target) => {
+              await deleteSample(target.id);
+              await refreshAvailableSamples();
+              renderManagementPage();
+              renderLibraryPanels();
+            },
+          });
         });
-        itemEl.appendChild(categorySelect);
-
-        const renameButton = document.createElement("button");
-        renameButton.textContent = "Rename";
-        renameButton.addEventListener("click", async () => {
-          const name = window.prompt("Rename sample:", sample.name);
-          if (!name?.trim()) return;
-          await updateSample(sample.id, { name: name.trim() });
-          await refreshAvailableSamples();
-          renderManagementPage();
-          renderLibraryPanels();
-        });
-        itemEl.appendChild(renameButton);
-
-        // Permanent, destructive -- rewrites the stored audio file itself
-        // in place (see backend/src/sampleStore.ts's reverseSampleAudio).
-        // Unrelated to a row's own non-destructive "Reverse playback"
-        // checkbox: rows that already have this sample loaded keep
-        // playing whatever they decoded earlier, since this never touches
-        // an already-decoded in-memory buffer -- only a fresh assignment
-        // from the library picks up the reversed audio.
-        const reverseButton = document.createElement("button");
-        reverseButton.textContent = "Reverse";
-        reverseButton.addEventListener("click", async () => {
-          if (
-            !window.confirm(
-              `Reverse "${sample.name}"? This permanently rewrites the stored audio and can't be undone.`,
-            )
-          ) {
-            return;
-          }
-          await reverseSample(sample.id);
-          await refreshAvailableSamples();
-          renderManagementPage();
-          renderLibraryPanels();
-        });
-        itemEl.appendChild(reverseButton);
-
-        const deleteButton = document.createElement("button");
-        deleteButton.textContent = "Delete";
-        deleteButton.addEventListener("click", async () => {
-          if (
-            !window.confirm(`Delete "${sample.name}"? This can't be undone.`)
-          ) {
-            return;
-          }
-          await deleteSample(sample.id);
-          await refreshAvailableSamples();
-          renderManagementPage();
-          renderLibraryPanels();
-        });
-        itemEl.appendChild(deleteButton);
+        itemEl.appendChild(button);
       },
     });
 
@@ -1074,9 +1057,6 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
     patchStatusEl.textContent = "Loaded";
   });
 
-  playButtonEl.addEventListener("click", () => model.clock.start());
-  stopButtonEl.addEventListener("click", () => model.clock.stop());
-
   bpmEl.addEventListener("input", () =>
     model.setStepSeconds(computeStepSeconds()),
   );
@@ -1114,9 +1094,11 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
     if (showingManagement) {
       libraryManagementViewEl.classList.add("hidden");
       sequencerViewEl.classList.remove("hidden");
+      sequencerTransportEl.classList.remove("hidden");
       manageLibraryButtonEl.textContent = "Manage Library";
     } else {
       sequencerViewEl.classList.add("hidden");
+      sequencerTransportEl.classList.add("hidden");
       libraryManagementViewEl.classList.remove("hidden");
       manageLibraryButtonEl.textContent = "Back to Sequencer";
       renderManagementPage();

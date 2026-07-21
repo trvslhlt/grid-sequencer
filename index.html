@@ -7,50 +7,56 @@
     <link rel="stylesheet" href="/src/main.css" />
   </head>
   <body>
-    <h1>Grid Sequencer</h1>
-    <p class="note">
-      Click a cell to toggle it on/off. Right-click any cell, row label, or
-      column header to edit it in the panel on the right. Left-click a row
-      label to mute it; left-click a column header to skip that step for
-      every row.
-    </p>
+    <div class="app-header">
+      <div class="app-header-left">
+        <button
+          id="play-stop-button"
+          class="play-stop-button"
+          aria-label="Play"
+          disabled
+        >
+          ▶
+        </button>
+        <h1>Grid Sequencer</h1>
+      </div>
+      <button id="manage-library-button" disabled>Manage Library</button>
+    </div>
     <div id="unlock"></div>
     <div id="app" class="hidden">
       <div class="transport">
-        <button id="play-button">Play</button>
-        <button id="stop-button">Stop</button>
-        <button id="master-button">Master…</button>
-        <button id="manage-library-button">Manage Library</button>
-        <button id="record-button">Record</button>
-        <span id="record-status" class="status-text"></span>
-        <label>
-          Tempo
-          <input id="bpm" type="number" min="20" max="300" step="1" value="120" />
-          BPM
-        </label>
-        <label>
-          Subdivision
-          <select id="subdivision"></select>
-        </label>
-        <label>
-          Steps
-          <input id="column-count" type="number" min="1" max="32" step="1" value="8" />
-        </label>
-        <label>
-          Row/column precedence
-          <select id="precedence-select">
-            <option value="row">Row wins</option>
-            <option value="column">Column wins</option>
-          </select>
-        </label>
-        <label>
-          Key
-          <select id="key-select"></select>
-        </label>
-        <label>
-          Scale
-          <select id="scale-select"></select>
-        </label>
+        <div id="sequencer-transport" class="sequencer-transport">
+          <button id="master-button">Master…</button>
+          <button id="record-button">Record</button>
+          <span id="record-status" class="status-text"></span>
+          <label>
+            Tempo
+            <input id="bpm" type="number" min="20" max="300" step="1" value="120" />
+            BPM
+          </label>
+          <label>
+            Subdivision
+            <select id="subdivision"></select>
+          </label>
+          <label>
+            Steps
+            <input id="column-count" type="number" min="1" max="32" step="1" value="8" />
+          </label>
+          <label>
+            Row/column precedence
+            <select id="precedence-select">
+              <option value="row">Row wins</option>
+              <option value="column">Column wins</option>
+            </select>
+          </label>
+          <label>
+            Key
+            <select id="key-select"></select>
+          </label>
+          <label>
+            Scale
+            <select id="scale-select"></select>
+          </label>
+        </div>
       </div>
       <div id="sequencer-view">
         <div class="main-layout">

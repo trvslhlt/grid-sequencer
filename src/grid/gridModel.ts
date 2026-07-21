@@ -76,7 +76,7 @@ const FULL_VELOCITY = 127;
  * (see RowConfig.reversed's doc). Reversing twice is exactly the identity,
  * so callers never need to keep the original buffer around alongside a
  * reversed copy -- just reverse in place again to flip back. */
-function reverseAudioBuffer(
+export function reverseAudioBuffer(
   audioContext: AudioContext,
   buffer: AudioBuffer,
 ): AudioBuffer {
