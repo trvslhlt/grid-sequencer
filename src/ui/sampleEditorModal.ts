@@ -1,18 +1,22 @@
-/** A popup for previewing and non-destructively editing a single library
- * sample -- trimming its start/end (bruit-kit's waveform range view) and
- * toggling reverse, both previewable before committing anything -- then
- * saving either overwrites the sample in place or creates a new one
- * alongside it. Pulled out of the management page's per-row controls (see
- * main.ts's renderManagementPage) so browsing samples isn't cluttered with
- * a full operations panel repeated on every row; editing now happens in
- * one place instead. All edits here are just local buffer math (see
- * extractRange/reverseAudioBuffer) until a save button is clicked -- the
- * stored file is never touched by dragging the range handles or toggling
- * reverse alone. */
+/** A popup for previewing and editing a single library sample -- trimming
+ * its start/end (bruit-kit's waveform range view), toggling reverse, and
+ * applying an effects chain (reusing gridView.ts's own effectsFields UI),
+ * all previewable live before committing anything. Trim/reverse alone stay
+ * non-destructive-until-saved and can overwrite the sample in place; once
+ * an effect is added, the edit becomes destructive processing baked into
+ * real audio, so overwrite is disallowed and only "Save as new" remains
+ * (see updateOverwriteAvailability). Pulled out of the management page's
+ * per-row controls (see main.ts's renderManagementPage) so browsing
+ * samples isn't cluttered with a full operations panel repeated on every
+ * row; editing now happens in one place instead. */
 
 import { type WaveformRange, createWaveformRangeView } from "bruit-kit/ui";
+import type { EffectSpec } from "../grid/config";
+import { type BuiltEffectsChain, buildEffectsChain } from "../grid/effectsChain";
 import { reverseAudioBuffer } from "../grid/gridModel";
 import type { SampleMetadata } from "../patchApi";
+import { type Field, renderFields } from "./fields";
+import { effectsFields } from "./gridView";
 
 export interface SampleEditorCallbacks {
   fetchAudio: (id: string) => Promise<ArrayBuffer>;
@@ -60,6 +64,70 @@ function extractRange(
   return out;
 }
 
+const MAX_TAIL_SECONDS = 15;
+
+/** How much extra render time a chain's own decay/echo tail needs beyond
+ * the dry buffer's own length, so baking doesn't truncate a reverb's
+ * decay or a delay's repeats mid-ring-out. Deliberately approximate (not
+ * every param combination is modeled precisely) -- this only sizes an
+ * offline render buffer, not anything audible on its own, so "generous
+ * enough to not cut off a tail" matters more than exactness. */
+function estimateTailSeconds(effects: EffectSpec[]): number {
+  let tail = 0;
+  for (const spec of effects) {
+    if (spec.type === "reverb") {
+      const decay =
+        typeof spec.params.decaySeconds === "number"
+          ? spec.params.decaySeconds
+          : 2.2;
+      tail = Math.max(tail, decay + 0.5);
+    } else if (spec.type === "delay") {
+      const delaySeconds =
+        (typeof spec.params.delayMs === "number" ? spec.params.delayMs : 180) /
+        1000;
+      const feedback =
+        typeof spec.params.feedback === "number" ? spec.params.feedback : 0.35;
+      // Repeats until the echo drops below ~1% amplitude.
+      const repeats = feedback > 0.001 ? Math.log(0.01) / Math.log(feedback) : 1;
+      tail = Math.max(tail, delaySeconds * (repeats + 1));
+    }
+  }
+  return Math.min(tail, MAX_TAIL_SECONDS);
+}
+
+/** Bakes `effects` onto `buffer` via an OfflineAudioContext, reusing the
+ * exact same chain-building logic (buildEffectsChain/instantiateEffect)
+ * the live grid uses for rows/master/send-bus -- offline rendering is just
+ * running that same graph faster than real time instead of to speakers.
+ * Cast to AudioContext at the boundary: every effect class in this
+ * toolkit only ever calls methods OfflineAudioContext also implements
+ * (createGain/createBiquadFilter/etc., all on the shared BaseAudioContext
+ * interface), so this is safe at runtime despite the narrower TS type. */
+async function renderEffectsOffline(
+  buffer: AudioBuffer,
+  effects: EffectSpec[],
+): Promise<AudioBuffer> {
+  const tailSeconds = estimateTailSeconds(effects);
+  const length = Math.ceil(
+    (buffer.duration + tailSeconds) * buffer.sampleRate,
+  );
+  const offlineContext = new OfflineAudioContext(
+    buffer.numberOfChannels,
+    length,
+    buffer.sampleRate,
+  );
+  const source = offlineContext.createBufferSource();
+  source.buffer = buffer;
+  const chain = buildEffectsChain(
+    offlineContext as unknown as AudioContext,
+    effects,
+  );
+  source.connect(chain.input);
+  chain.output.connect(offlineContext.destination);
+  source.start();
+  return offlineContext.startRendering();
+}
+
 export function openSampleEditorModal(
   sample: SampleMetadata,
   audioContext: AudioContext,
@@ -74,14 +142,20 @@ export function openSampleEditorModal(
   overlay.appendChild(modal);
 
   let currentSource: AudioBufferSourceNode | null = null;
+  let currentChain: BuiltEffectsChain | null = null;
   function stopPreview(): void {
-    if (!currentSource) return;
-    try {
-      currentSource.stop();
-    } catch {
-      // already stopped/finished
+    if (currentSource) {
+      try {
+        currentSource.stop();
+      } catch {
+        // already stopped/finished
+      }
+      currentSource = null;
     }
-    currentSource = null;
+    if (currentChain) {
+      currentChain.dispose();
+      currentChain = null;
+    }
   }
 
   function close(): void {
@@ -117,10 +191,33 @@ export function openSampleEditorModal(
 
   let range: WaveformRange = { start: 0, end: 1 };
   let reversed = false;
+  let effects: EffectSpec[] = [];
+  let overwriteButtonEl: HTMLButtonElement | null = null;
+
+  // Overwrite rewrites the stored file in place -- fine for trim/reverse
+  // (still just a non-destructive edit until a save button is clicked),
+  // but once an effect is in the chain the save is genuinely destructive
+  // processing, so only "Save as new" stays available (see this file's
+  // own doc comment).
+  function updateOverwriteAvailability(): void {
+    if (!overwriteButtonEl) return;
+    const blocked = effects.length > 0;
+    overwriteButtonEl.disabled = blocked;
+    overwriteButtonEl.title = blocked
+      ? "Effects are destructive processing — save as a new sample instead"
+      : "";
+  }
 
   function buildWorkingBuffer(original: AudioBuffer): AudioBuffer {
     const trimmed = extractRange(audioContext, original, range);
     return reversed ? reverseAudioBuffer(audioContext, trimmed) : trimmed;
+  }
+
+  async function buildFinalBuffer(original: AudioBuffer): Promise<AudioBuffer> {
+    const working = buildWorkingBuffer(original);
+    return effects.length > 0
+      ? renderEffectsOffline(working, effects)
+      : working;
   }
 
   function renderLoaded(original: AudioBuffer): void {
@@ -156,15 +253,54 @@ export function openSampleEditorModal(
       stopPreview();
       const source = audioContext.createBufferSource();
       source.buffer = buildWorkingBuffer(original);
-      source.connect(audioContext.destination);
+      // Live nodes, not the offline render -- immediate audible feedback
+      // while dialing in effect params, same real-time chain the grid
+      // itself plays rows through (see buildEffectsChain). An empty
+      // `effects` array still works here: chainEffects treats it as a
+      // no-op passthrough, so this path is identical to plain trim/
+      // reverse preview when no effect has been added yet.
+      const chain = buildEffectsChain(audioContext, effects);
+      source.connect(chain.input);
+      chain.output.connect(audioContext.destination);
       source.addEventListener("ended", () => {
         if (currentSource === source) currentSource = null;
+        if (currentChain === chain) {
+          chain.dispose();
+          currentChain = null;
+        }
       });
       source.start();
       currentSource = source;
+      currentChain = chain;
     });
     controlsRow.appendChild(previewButton);
     body.appendChild(controlsRow);
+
+    const effectsSection = document.createElement("div");
+    effectsSection.className = "panel-section";
+    const effectsTitleRow = document.createElement("div");
+    effectsTitleRow.className = "panel-section-title-row";
+    const effectsTitle = document.createElement("span");
+    effectsTitle.className = "panel-section-title";
+    effectsTitle.textContent = "Effects (destructive — forces Save as new)";
+    effectsTitleRow.appendChild(effectsTitle);
+    effectsSection.appendChild(effectsTitleRow);
+    const effectsFieldsEl = document.createElement("div");
+    effectsSection.appendChild(effectsFieldsEl);
+    body.appendChild(effectsSection);
+
+    function renderEffectsSection(): void {
+      const fields: Field[] = effectsFields(
+        () => effects,
+        (next) => {
+          effects = next;
+          renderEffectsSection();
+          updateOverwriteAvailability();
+        },
+      );
+      renderFields(effectsFieldsEl, fields);
+    }
+    renderEffectsSection();
 
     const nameField = document.createElement("div");
     nameField.className = "panel-field";
@@ -223,9 +359,11 @@ export function openSampleEditorModal(
       const name = window.prompt("Name the new sample:", `${baseName} copy`);
       if (!name?.trim()) return;
       stopPreview();
-      statusEl.textContent = "Saving…";
+      statusEl.textContent =
+        effects.length > 0 ? "Rendering…" : "Saving…";
       try {
-        await callbacks.onSaveAsNew(buildWorkingBuffer(original), {
+        const finalBuffer = await buildFinalBuffer(original);
+        await callbacks.onSaveAsNew(finalBuffer, {
           name: name.trim(),
           category: categorySelect.value,
         });
@@ -237,9 +375,9 @@ export function openSampleEditorModal(
     });
     footer.appendChild(saveAsNewButton);
 
-    const overwriteButton = document.createElement("button");
-    overwriteButton.textContent = "Save (overwrite)";
-    overwriteButton.addEventListener("click", async () => {
+    overwriteButtonEl = document.createElement("button");
+    overwriteButtonEl.textContent = "Save (overwrite)";
+    overwriteButtonEl.addEventListener("click", async () => {
       if (
         !window.confirm(
           `Overwrite "${sample.name}" with these changes? This can't be undone.`,
@@ -260,7 +398,8 @@ export function openSampleEditorModal(
         console.error(err);
       }
     });
-    footer.appendChild(overwriteButton);
+    footer.appendChild(overwriteButtonEl);
+    updateOverwriteAvailability();
 
     modal.appendChild(footer);
   }

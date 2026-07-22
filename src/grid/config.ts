@@ -3,6 +3,7 @@ import type { TriggerMode } from "./triggerModes";
 
 export type EffectType =
   | "filter"
+  | "gain"
   | "delay"
   | "distortion"
   | "compressor"

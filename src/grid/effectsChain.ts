@@ -7,6 +7,7 @@ import {
   DistortionEffect,
   FilterEffect,
   FlangerEffect,
+  GainEffect,
   PhaserEffect,
   ReverbEffect,
   RingModulationEffect,
@@ -23,6 +24,11 @@ function instantiateEffect(
   switch (spec.type) {
     case "filter": {
       const fx = new FilterEffect(audioContext);
+      fx.setParams({ wet: 1, ...spec.params });
+      return fx;
+    }
+    case "gain": {
+      const fx = new GainEffect(audioContext);
       fx.setParams({ wet: 1, ...spec.params });
       return fx;
     }

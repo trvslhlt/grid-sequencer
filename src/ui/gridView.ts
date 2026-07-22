@@ -110,6 +110,30 @@ const EFFECT_TABLE: Array<{
     ],
   },
   {
+    type: "gain",
+    label: "Gain",
+    params: [
+      {
+        key: "gainDb",
+        label: "Gain (dB)",
+        kind: "range",
+        min: -24,
+        max: 24,
+        step: 0.5,
+        default: 0,
+      },
+      {
+        key: "wet",
+        label: "Wet",
+        kind: "range",
+        min: 0,
+        max: 1,
+        step: 0.01,
+        default: 1,
+      },
+    ],
+  },
+  {
     type: "distortion",
     label: "Distortion",
     params: [
