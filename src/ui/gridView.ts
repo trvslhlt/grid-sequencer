@@ -1,6 +1,6 @@
 import type { EffectSpec, EffectType, EnvelopeParams } from "../grid/config";
 import type { GridModel, Row } from "../grid/gridModel";
-import { SOURCE_TYPE_LABELS } from "../grid/sourceFactory";
+import { SOURCE_TYPE_LABELS, type SourceType } from "../grid/sourceFactory";
 import {
   TRIGGER_MODE_LABELS,
   type TriggerModeKind,
@@ -732,6 +732,85 @@ function openParamRangeModal(
   document.body.appendChild(overlay);
 }
 
+/** The "+" cell's own popup (see render()'s grid-corner-column cell
+ * appended right after the last row) -- collects a source type + name
+ * for a new row, same two fields the old always-visible add-row form
+ * used to keep permanently on screen below the grid. */
+function openAddRowModal(
+  onAdd: (sourceType: SourceType, name: string) => void,
+): void {
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  const modal = document.createElement("div");
+  modal.className = "modal param-range-modal";
+  overlay.appendChild(modal);
+
+  function close(): void {
+    overlay.remove();
+  }
+  overlay.addEventListener("click", (event) => {
+    if (event.target === overlay) close();
+  });
+
+  const header = document.createElement("div");
+  header.className = "modal-header";
+  const title = document.createElement("span");
+  title.className = "modal-title";
+  title.textContent = "Add row";
+  const closeButton = document.createElement("button");
+  closeButton.textContent = "×";
+  closeButton.className = "modal-close-button";
+  closeButton.addEventListener("click", close);
+  header.append(title, closeButton);
+  modal.appendChild(header);
+
+  const body = document.createElement("div");
+  body.className = "modal-body";
+  modal.appendChild(body);
+
+  const sourceTypes = Object.keys(SOURCE_TYPE_LABELS) as SourceType[];
+  let sourceType: SourceType = sourceTypes[0];
+  let name = "";
+
+  renderFields(body, [
+    {
+      key: "sourceType",
+      label: "Type",
+      kind: "select",
+      value: sourceType,
+      options: sourceTypes.map((type) => ({
+        value: type,
+        label: SOURCE_TYPE_LABELS[type],
+      })),
+      onChange: (v) => {
+        sourceType = v as SourceType;
+      },
+    },
+    {
+      key: "name",
+      label: "Name",
+      kind: "text",
+      value: name,
+      onChange: (v) => {
+        name = v;
+      },
+    },
+  ]);
+
+  const footer = document.createElement("div");
+  footer.className = "modal-footer";
+  const addButton = document.createElement("button");
+  addButton.textContent = "Add";
+  addButton.addEventListener("click", () => {
+    onAdd(sourceType, name.trim() || SOURCE_TYPE_LABELS[sourceType]);
+    close();
+  });
+  footer.appendChild(addButton);
+  modal.appendChild(footer);
+
+  document.body.appendChild(overlay);
+}
+
 /** A chain is a plain ordered list now, not six fixed on/off slots: each
  * entry already in `getEffects()` renders as its own removable block (a
  * "Remove" button doubling as that instance's own heading, same
@@ -754,17 +833,49 @@ export function effectsFields(
   const effects = getEffects();
   const fields: Field[] = [];
 
+  // Swaps effect `from` with whichever neighbor is at `to`, a no-op past
+  // either end of the chain -- shared by every instance's ▲/▼ buttons
+  // below rather than redefined per iteration.
+  function moveEffect(from: number, to: number): void {
+    const current = getEffects();
+    if (to < 0 || to >= current.length) return;
+    const next = [...current];
+    const [moved] = next.splice(from, 1);
+    next.splice(to, 0, moved);
+    onUpdate(next);
+  }
+
   effects.forEach((spec, index) => {
     const table = EFFECT_TABLE.find((e) => e.type === spec.type);
     if (!table) return;
+    // ▲/▼ reorder this instance within the chain (disabled at either
+    // end), "Remove" deletes it -- doubles as this instance's own
+    // heading (table.label as the row's label) the same way the old
+    // lone "Remove" button used to, just with two more compact controls
+    // alongside it instead of a second full-width button each.
     fields.push({
-      key: `${index}-remove`,
-      label: `${table.label} — Remove`,
-      kind: "button",
-      onClick: () => {
-        const current = getEffects();
-        onUpdate(current.filter((_, i) => i !== index));
-      },
+      key: `${index}-header`,
+      label: table.label,
+      kind: "buttonRow",
+      buttons: [
+        {
+          label: "▲",
+          disabled: index === 0,
+          onClick: () => moveEffect(index, index - 1),
+        },
+        {
+          label: "▼",
+          disabled: index === effects.length - 1,
+          onClick: () => moveEffect(index, index + 1),
+        },
+        {
+          label: "Remove",
+          onClick: () => {
+            const current = getEffects();
+            onUpdate(current.filter((_, i) => i !== index));
+          },
+        },
+      ],
     });
     for (const param of table.params) {
       // No "Effect: " prefix -- the Remove button above already reads as
@@ -1002,6 +1113,11 @@ export interface GridViewOptions {
    * "does this match the selected row" state, which nothing else here
    * tells them about. */
   onSelectionChange?: (row: Row | null) => void;
+  /** The "+" cell's own popup (see openAddRowModal) -- main.ts owns
+   * actually creating the row (model.addRow, auto-loading a placeholder
+   * sample, its own view.render()), this file just collects sourceType/
+   * name and hands them off. */
+  onAddRow?: (sourceType: SourceType, name: string) => Promise<void>;
 }
 
 export interface GridViewHandle {
@@ -1682,6 +1798,24 @@ export function createGridView(
       });
       cellEls.push(rowCellEls);
     }
+
+    // Grid auto-flow places this straight into column 1 of the next
+    // implicit row -- directly under the last row's own label, no
+    // manual row/column math needed -- with no cell divs following it,
+    // so the rest of that row just stays empty. Replaces the old
+    // always-visible add-row form (select + name input + button)
+    // permanently on screen below the grid with a single affordance
+    // that opens openAddRowModal instead.
+    const addRowEl = document.createElement("div");
+    addRowEl.className = "master-cell add-row-cell";
+    addRowEl.textContent = "+";
+    addRowEl.title = "Add row";
+    addRowEl.addEventListener("click", () => {
+      openAddRowModal((sourceType, name) => {
+        options.onAddRow?.(sourceType, name);
+      });
+    });
+    grid.appendChild(addRowEl);
 
     const panel = document.createElement("div");
     // "selection-panel", not just "config-panel" -- the latter is a

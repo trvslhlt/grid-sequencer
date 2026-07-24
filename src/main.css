@@ -124,11 +124,21 @@ input:disabled {
   opacity: 0.4;
 }
 
-.add-row {
-  display: flex;
-  gap: 0.5rem;
-  margin-top: 1rem;
-  align-items: center;
+/* Grid-table cell (see gridView.ts's render()), not a separate form --
+ * sits directly under the last row's own label via plain CSS Grid
+ * auto-flow. Dashed border + muted look distinguishes it from a real
+ * row-master cell at a glance. */
+.add-row-cell {
+  cursor: pointer;
+  border-style: dashed;
+  color: #6a6f7a;
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.add-row-cell:hover {
+  color: #e4e6eb;
+  border-color: #4c7dff;
 }
 
 .patch-controls {
@@ -393,6 +403,23 @@ input:disabled {
 
 .panel-field button {
   width: 100%;
+}
+
+/* effectsFields' own ▲/▼/Remove row (see fields.ts's "buttonRow" kind) --
+ * several small auto-width buttons sharing one row instead of each
+ * getting the full-width treatment a lone "button" kind field gets.
+ * Extra specificity (not just ".button-row button") so it reliably wins
+ * over .panel-field button's width:100% regardless of declaration order. */
+.panel-field .button-row {
+  display: flex;
+  gap: 0.3rem;
+  justify-content: flex-end;
+}
+
+.panel-field .button-row button {
+  width: auto;
+  padding: 0.2rem 0.5rem;
+  font-size: 0.75rem;
 }
 
 .panel-field select {

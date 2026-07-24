@@ -97,6 +97,21 @@ export type Field =
   | {
       key: string;
       label: string;
+      kind: "buttonRow";
+      /** Several small, auto-width buttons sharing one row instead of
+       * each getting its own full-width row the way a lone "button" kind
+       * field does (see effectsFields' own reorder/remove controls) --
+       * for a compact icon-toolbar-style group next to a label, not a
+       * general layout option every button needs. */
+      buttons: Array<{
+        label: string;
+        onClick: () => void;
+        disabled?: boolean;
+      }>;
+    }
+  | {
+      key: string;
+      label: string;
       kind: "override";
       /** Whether this level currently sets its own value. This is the
        * *entire* override mechanism -- there's no separate sentinel value
@@ -199,7 +214,18 @@ function renderField(container: HTMLElement, field: Field): void {
   label.textContent = field.label;
   row.appendChild(label);
 
-  if (field.kind === "checkbox") {
+  if (field.kind === "buttonRow") {
+    const wrap = document.createElement("span");
+    wrap.className = "button-row";
+    for (const btn of field.buttons) {
+      const buttonEl = document.createElement("button");
+      buttonEl.textContent = btn.label;
+      buttonEl.disabled = btn.disabled ?? false;
+      buttonEl.addEventListener("click", btn.onClick);
+      wrap.appendChild(buttonEl);
+    }
+    row.appendChild(wrap);
+  } else if (field.kind === "checkbox") {
     const input = document.createElement("input");
     input.type = "checkbox";
     input.checked = field.value;

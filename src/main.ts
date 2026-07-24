@@ -111,11 +111,6 @@ const precedenceSelectEl =
 const keySelectEl = document.querySelector<HTMLSelectElement>("#key-select")!;
 const scaleSelectEl =
   document.querySelector<HTMLSelectElement>("#scale-select")!;
-const newRowTypeEl =
-  document.querySelector<HTMLSelectElement>("#new-row-type")!;
-const newRowNameEl = document.querySelector<HTMLInputElement>("#new-row-name")!;
-const addRowButtonEl =
-  document.querySelector<HTMLButtonElement>("#add-row-button")!;
 const patchNameEl = document.querySelector<HTMLInputElement>("#patch-name")!;
 const savePatchButtonEl =
   document.querySelector<HTMLButtonElement>("#save-patch-button")!;
@@ -124,13 +119,6 @@ const patchSelectEl =
 const loadPatchButtonEl =
   document.querySelector<HTMLButtonElement>("#load-patch-button")!;
 const patchStatusEl = document.querySelector<HTMLSpanElement>("#patch-status")!;
-
-for (const type of Object.keys(SOURCE_TYPE_LABELS) as SourceType[]) {
-  const option = document.createElement("option");
-  option.value = type;
-  option.textContent = SOURCE_TYPE_LABELS[type];
-  newRowTypeEl.appendChild(option);
-}
 
 for (const subdivision of SUBDIVISIONS) {
   const option = document.createElement("option");
@@ -390,6 +378,9 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
     },
     onSaveEffectChainPreset: saveEffectChainPreset,
     onSelectionChange: () => renderLibraryPanels(),
+    onAddRow: async (sourceType, name) => {
+      await addRow(sourceType, name);
+    },
   });
 
   // Fetches, decodes, and assigns a library sample onto `row` -- the
@@ -1053,13 +1044,6 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
   await refreshEffectChainPresets();
   view.render();
   renderLibraryPanels();
-
-  addRowButtonEl.addEventListener("click", async () => {
-    const sourceType = newRowTypeEl.value as SourceType;
-    const name = newRowNameEl.value.trim() || SOURCE_TYPE_LABELS[sourceType];
-    newRowNameEl.value = "";
-    await addRow(sourceType, name);
-  });
 
   savePatchButtonEl.addEventListener("click", async () => {
     const name = patchNameEl.value.trim();
