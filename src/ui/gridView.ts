@@ -23,6 +23,14 @@ interface EffectRangeParamSpec {
    * as `stored * scale`, written back as `display / scale`. Omitted (1)
    * for every param whose native unit is already UI-friendly. */
   scale?: number;
+  /** Absolute ceiling a per-instance custom range (EffectSpec.paramRanges,
+   * edited via this param's own clickable label -- see
+   * openParamRangeModal) can never exceed -- only set here when a param
+   * has a genuine constraint beyond "this was a comfortable slider
+   * default" (see hardBoundFor's generic fallback for every param that
+   * omits this). */
+  hardMin?: number;
+  hardMax?: number;
 }
 
 interface EffectSelectParamSpec {
@@ -581,6 +589,45 @@ const EFFECT_TABLE: Array<{
   },
 ];
 
+/** The absolute min/max a per-instance custom range (EffectSpec.
+ * paramRanges) can never exceed, regardless of what the user sets --
+ * "there should still be limits" (see config.ts's EffectSpec doc). Two
+ * named special cases with a genuine constraint behind them, then a
+ * generic fallback for every other param, whose default min/max was
+ * always just a comfortable slider range rather than a physical limit:
+ * - `wet`: every effect's dry/wet crossfade is a 0..1 ratio by
+ *   definition (see bruit-kit's createDryWet) -- never anything else.
+ * - `feedback`: must stay under 1 or a delay/flanger/chorus's feedback
+ *   loop runs away into unbounded self-oscillation instead of decaying.
+ * - everything else: widened 3x outward from the table's own default
+ *   span, floored at 0 for params whose default range never goes
+ *   negative (Hz, ms, seconds, counts) -- generous enough to "flex
+ *   beyond arbitrary hardcoded limits" without being unbounded.
+ */
+function hardBoundFor(param: EffectRangeParamSpec): { min: number; max: number } {
+  if (param.hardMin !== undefined && param.hardMax !== undefined) {
+    return { min: param.hardMin, max: param.hardMax };
+  }
+  if (param.key === "wet") return { min: 0, max: 1 };
+  if (param.key === "feedback") return { min: 0, max: 0.98 };
+  const span = param.max - param.min;
+  const hardMin = param.min - span;
+  return {
+    min: param.min >= 0 ? Math.max(0, hardMin) : hardMin,
+    max: param.max + span,
+  };
+}
+
+/** The range currently in effect for one param of one effect instance --
+ * `spec.paramRanges[key]` if the user has customized it, otherwise the
+ * table's own default `{min, max}`. */
+function activeRangeFor(
+  spec: EffectSpec,
+  param: EffectRangeParamSpec,
+): { min: number; max: number } {
+  return spec.paramRanges?.[param.key] ?? { min: param.min, max: param.max };
+}
+
 // Shared across every effectsFields call (row/cell/master alike) rather
 // than scoped per-chain -- effectsFields is a plain module-level function
 // called fresh from 3 different places, with no closure of its own that
@@ -590,6 +637,102 @@ const EFFECT_TABLE: Array<{
 // pre-selected instead of the first one) worth accepting for how much
 // simpler it keeps this over threading a unique key through every caller.
 let pendingEffectType: EffectType = EFFECT_TABLE[0].type;
+
+/** A small popup (min/max for exactly one param) opened by clicking that
+ * param's own label -- see fields.ts's onLabelClick/labelCustomized on
+ * the "range" field kind. Appended straight to document.body, outside
+ * whatever panel container the caller re-renders on every edit (see
+ * effectsFields' own doc on why every handler re-reads getEffects()
+ * fresh): a commit here triggers that outer re-render same as any other
+ * effectsFields edit, but this popup's own DOM isn't part of that
+ * container, so it needs its own local re-render (renderBody) to reflect
+ * the just-committed, possibly-hard-bound-clamped values instead of just
+ * whatever was last typed. */
+function openParamRangeModal(
+  label: string,
+  getActive: () => { min: number; max: number },
+  hard: { min: number; max: number },
+  step: number,
+  onCommit: (min: number, max: number) => void,
+  onReset: () => void,
+): void {
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  const modal = document.createElement("div");
+  modal.className = "modal param-range-modal";
+  overlay.appendChild(modal);
+
+  function close(): void {
+    overlay.remove();
+  }
+  overlay.addEventListener("click", (event) => {
+    if (event.target === overlay) close();
+  });
+
+  const header = document.createElement("div");
+  header.className = "modal-header";
+  const title = document.createElement("span");
+  title.className = "modal-title";
+  title.textContent = `${label} — range`;
+  const closeButton = document.createElement("button");
+  closeButton.textContent = "×";
+  closeButton.className = "modal-close-button";
+  closeButton.addEventListener("click", close);
+  header.append(title, closeButton);
+  modal.appendChild(header);
+
+  const body = document.createElement("div");
+  body.className = "modal-body";
+  modal.appendChild(body);
+
+  function renderBody(): void {
+    const active = getActive();
+    renderFields(body, [
+      {
+        key: "range-min",
+        label: "Min",
+        kind: "number",
+        value: active.min,
+        min: hard.min,
+        max: hard.max,
+        step,
+        commitOnBlur: true,
+        onChange: (v) => {
+          onCommit(v, getActive().max);
+          renderBody();
+        },
+      },
+      {
+        key: "range-max",
+        label: "Max",
+        kind: "number",
+        value: active.max,
+        min: hard.min,
+        max: hard.max,
+        step,
+        commitOnBlur: true,
+        onChange: (v) => {
+          onCommit(getActive().min, v);
+          renderBody();
+        },
+      },
+    ]);
+  }
+  renderBody();
+
+  const footer = document.createElement("div");
+  footer.className = "modal-footer";
+  const resetButton = document.createElement("button");
+  resetButton.textContent = "Reset to default";
+  resetButton.addEventListener("click", () => {
+    onReset();
+    renderBody();
+  });
+  footer.appendChild(resetButton);
+  modal.appendChild(footer);
+
+  document.body.appendChild(overlay);
+}
 
 /** A chain is a plain ordered list now, not six fixed on/off slots: each
  * entry already in `getEffects()` renders as its own removable block (a
@@ -655,19 +798,85 @@ export function effectsFields(
         // min/max/step are already authored in display units (e.g.
         // compressor attack's 0..200 ms) -- only `default`/`stored` are in
         // the effect class's own native units (seconds), so scale applies
-        // to the value conversion alone, not the range bounds.
+        // to the value conversion alone, not the range bounds. The
+        // slider's own min/max come from activeRangeFor, not the table's
+        // param.min/max directly, so a per-instance custom range (set via
+        // this same field's own clickable label, see below) actually
+        // takes effect on the control itself.
         const scale = param.scale ?? 1;
         const storedNumber =
           typeof stored === "number" ? stored : param.default;
+        const active = activeRangeFor(spec, param);
+        const hard = hardBoundFor(param);
+
+        // Shared by the label-click popup's two number inputs (see
+        // openParamRangeModal) -- clamps both to this param's hard
+        // bound, then clamps the currently-stored value into whatever
+        // range results so a widened-then-narrowed range can't leave the
+        // slider showing a value outside its own min/max.
+        const commitRange = (nextMin: number, nextMax: number): void => {
+          const clampedMin = Math.min(Math.max(nextMin, hard.min), hard.max);
+          const clampedMax = Math.min(Math.max(nextMax, hard.min), hard.max);
+          const finalMin = Math.min(clampedMin, clampedMax);
+          const finalMax = Math.max(clampedMin, clampedMax);
+          const current = getEffects();
+          onUpdate(
+            current.map((e, i) => {
+              if (i !== index) return e;
+              const storedValue = e.params[param.key];
+              const storedDisplay =
+                typeof storedValue === "number"
+                  ? storedValue * scale
+                  : undefined;
+              const clampedDisplay =
+                storedDisplay === undefined
+                  ? undefined
+                  : Math.min(Math.max(storedDisplay, finalMin), finalMax);
+              return {
+                ...e,
+                params:
+                  clampedDisplay === undefined
+                    ? e.params
+                    : { ...e.params, [param.key]: clampedDisplay / scale },
+                paramRanges: {
+                  ...e.paramRanges,
+                  [param.key]: { min: finalMin, max: finalMax },
+                },
+              };
+            }),
+          );
+        };
+
+        const resetRange = (): void => {
+          const current = getEffects();
+          onUpdate(
+            current.map((e, i) => {
+              if (i !== index || !e.paramRanges) return e;
+              const { [param.key]: _dropped, ...restRanges } = e.paramRanges;
+              return { ...e, paramRanges: restRanges };
+            }),
+          );
+        };
+
         fields.push({
           key,
           label: param.label,
           kind: "range",
           value: storedNumber * scale,
-          min: param.min,
-          max: param.max,
+          min: active.min,
+          max: active.max,
           step: param.step,
           indented: true,
+          labelCustomized: spec.paramRanges?.[param.key] !== undefined,
+          onLabelClick: () =>
+            openParamRangeModal(
+              param.label,
+              () => activeRangeFor(getEffects()[index], param),
+              hard,
+              param.step,
+              commitRange,
+              resetRange,
+            ),
           onChange: (v) => onChange(v / scale),
         });
       }

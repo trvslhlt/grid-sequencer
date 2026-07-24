@@ -363,6 +363,26 @@ input:disabled {
   flex-shrink: 0;
 }
 
+/* effectsFields' own params (see gridView.ts's openParamRangeModal) --
+ * clicking the label opens a small popup to edit that control's own
+ * min/max, instead of a permanent "Customize ranges" section. */
+.field-label-clickable {
+  cursor: pointer;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+
+.field-label-clickable:hover {
+  color: #ffb454;
+}
+
+/* Persistent, not just on hover -- signals "this control already has a
+ * non-default range set," same accent color as .cell.overridden uses
+ * elsewhere in this app for "differs from default." */
+.field-label-clickable.field-label-customized {
+  color: #ffb454;
+}
+
 .panel-field input[type="range"] {
   width: 100px;
 }
@@ -551,6 +571,13 @@ input:disabled {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+}
+
+/* A small popup (just min/max for one param, see gridView.ts's
+ * openParamRangeModal) shouldn't stretch to the same width as the
+ * sample editor's own much larger modal. */
+.param-range-modal {
+  max-width: 320px;
 }
 
 .modal-header {

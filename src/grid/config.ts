@@ -19,6 +19,18 @@ export type EffectType =
 export interface EffectSpec {
   type: EffectType;
   params: Record<string, number | string>;
+  /** Per-instance custom min/max for this effect's own numeric params --
+   * narrower or wider than EFFECT_TABLE's default slider range (see
+   * gridView.ts's hardBoundFor), always clamped to that param's own hard
+   * bound regardless of what's set here. Absent, or missing a given
+   * param's key, falls back to the table's default range for that param.
+   * Scoped to this one effect instance (this row/cell/master/send-bus
+   * slot's own copy of the effect), not shared with any other instance of
+   * the same effect type elsewhere in the patch. Scaffolding for later
+   * randomize/automate features (see the sound-play backlog) -- a scoped
+   * range is what makes "randomize this param" controlled instead of
+   * jumping the full hardcoded range every time. */
+  paramRanges?: Record<string, { min: number; max: number }>;
 }
 
 export interface EnvelopePoint {

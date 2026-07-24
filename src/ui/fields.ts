@@ -39,6 +39,16 @@ export type Field =
       min?: number;
       max?: number;
       step?: number;
+      indented?: boolean;
+      /** Fires onChange on blur/Enter instead of every "input" event --
+       * for a caller whose onChange rebuilds this same fields list (e.g.
+       * effectsFields' range-editor inputs, whose onChange changes a
+       * slider's own min/max elsewhere in this list). A live "input"
+       * listener would tear this input down mid-keystroke the same way a
+       * "range" field's own drag would abort under a synchronous rebuild
+       * (see this file's own top comment). Defaults to false (live
+       * "input"), unchanged from every existing caller. */
+      commitOnBlur?: boolean;
       onChange: (value: number) => void;
     }
   | {
@@ -55,6 +65,17 @@ export type Field =
        * above them (see gridView.ts's effectsFields), not a general
        * layout option every field needs. */
       indented?: boolean;
+      /** Makes the label itself clickable -- e.g. effectsFields' own
+       * params open a small popup to edit this control's own min/max
+       * range (see gridView.ts's openParamRangeModal) instead of a
+       * separate always-visible "Customize ranges" section cluttering
+       * the panel with two extra rows per param. */
+      onLabelClick?: () => void;
+      /** Visual cue (label rendered in the accent color) that this
+       * control currently has a non-default range set -- same orange
+       * used elsewhere in this app for "differs from default" (see
+       * main.css's .cell.overridden). Meaningless without onLabelClick. */
+      labelCustomized?: boolean;
       onChange: (value: number) => void;
     }
   | {
@@ -218,6 +239,11 @@ function renderField(container: HTMLElement, field: Field): void {
     row.appendChild(input);
   } else if (field.kind === "range") {
     if (field.indented) row.classList.add("panel-field-indented");
+    if (field.onLabelClick) {
+      label.classList.add("field-label-clickable");
+      if (field.labelCustomized) label.classList.add("field-label-customized");
+      label.addEventListener("click", field.onLabelClick);
+    }
     const { input, valueEl } = renderRangeInput(
       field.value,
       field.min,
@@ -228,13 +254,24 @@ function renderField(container: HTMLElement, field: Field): void {
     row.appendChild(input);
     row.appendChild(valueEl);
   } else if (field.kind === "number") {
+    if (field.indented) row.classList.add("panel-field-indented");
     const input = document.createElement("input");
     input.type = "number";
     if (field.min !== undefined) input.min = String(field.min);
     if (field.max !== undefined) input.max = String(field.max);
     if (field.step !== undefined) input.step = String(field.step);
     input.value = String(field.value);
-    input.addEventListener("input", () => field.onChange(Number(input.value)));
+    if (field.commitOnBlur) {
+      const commit = () => field.onChange(Number(input.value));
+      input.addEventListener("blur", commit);
+      input.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter") return;
+        commit();
+        input.blur();
+      });
+    } else {
+      input.addEventListener("input", () => field.onChange(Number(input.value)));
+    }
     row.appendChild(input);
   } else if (field.kind === "automation") {
     row.classList.add("panel-field-wide");
