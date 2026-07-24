@@ -607,6 +607,12 @@ input:disabled {
   max-width: 320px;
 }
 
+/* Save name + Load select/button -- a bit more room than the param-range
+ * popup but still nowhere near the sample editor's full-width modal. */
+.patch-modal {
+  max-width: 380px;
+}
+
 .modal-header {
   display: flex;
   align-items: center;

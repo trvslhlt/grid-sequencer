@@ -28,6 +28,7 @@ import {
   listPatches,
   listSamples,
   loadPatch,
+  type PatchSummary,
   replaceSampleAudio,
   savePatch,
   updateEffectChainPreset,
@@ -43,6 +44,7 @@ import {
   effectsFields,
 } from "./ui/gridView";
 import { type TreeGroup, renderLibraryTree } from "./ui/libraryTree";
+import { openPatchModal } from "./ui/patchModal";
 import { openSampleEditorModal } from "./ui/sampleEditorModal";
 import { encodeWav } from "./wavEncoder";
 
@@ -111,14 +113,8 @@ const precedenceSelectEl =
 const keySelectEl = document.querySelector<HTMLSelectElement>("#key-select")!;
 const scaleSelectEl =
   document.querySelector<HTMLSelectElement>("#scale-select")!;
-const patchNameEl = document.querySelector<HTMLInputElement>("#patch-name")!;
-const savePatchButtonEl =
-  document.querySelector<HTMLButtonElement>("#save-patch-button")!;
-const patchSelectEl =
-  document.querySelector<HTMLSelectElement>("#patch-select")!;
-const loadPatchButtonEl =
-  document.querySelector<HTMLButtonElement>("#load-patch-button")!;
-const patchStatusEl = document.querySelector<HTMLSpanElement>("#patch-status")!;
+const patchButtonEl =
+  document.querySelector<HTMLButtonElement>("#patch-button")!;
 
 for (const subdivision of SUBDIVISIONS) {
   const option = document.createElement("option");
@@ -329,10 +325,10 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
   // applyPatch and assignSampleToRow below (see patch.ts's doc comment).
   const rowSampleIds = new Map<string, string>();
 
-  // Mirrors refreshPatchList's own cache-then-sync-getter shape: gridView.ts
-  // and the library panels below render synchronously, so they can't await
-  // a fetch mid-render -- main.ts keeps these populated instead and hands
-  // back plain synchronous getters/closures over them.
+  // gridView.ts and the library panels below render synchronously, so
+  // they can't await a fetch mid-render -- main.ts keeps these populated
+  // instead and hands back plain synchronous getters/closures over them
+  // (same shape refreshAvailablePatches below uses for the patch popup).
   let availableSamples: SampleMetadata[] = [];
   async function refreshAvailableSamples(): Promise<void> {
     availableSamples = await listSamples();
@@ -900,19 +896,18 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
     scaleSelectEl.value = model.scaleType;
   }
 
-  async function refreshPatchList(): Promise<void> {
-    const previouslySelected = patchSelectEl.value;
-    const patches = await listPatches();
-    patchSelectEl.innerHTML = "";
-    for (const patch of patches) {
-      const option = document.createElement("option");
-      option.value = patch.id;
-      option.textContent = patch.name;
-      patchSelectEl.appendChild(option);
-    }
-    if (patches.some((p) => p.id === previouslySelected)) {
-      patchSelectEl.value = previouslySelected;
-    }
+  // Mirrors availableSamples/availableInstrumentPresets/
+  // availableEffectChainPresets' own cache-then-sync-getter shape -- the
+  // patch popup (see main.ts's patchButtonEl click handler below) reads
+  // this synchronously when it opens, refreshed fresh right before.
+  let availablePatches: PatchSummary[] = [];
+  async function refreshAvailablePatches(): Promise<void> {
+    availablePatches = await listPatches();
+  }
+
+  let currentPatchName = "";
+  function updatePatchButtonLabel(): void {
+    patchButtonEl.textContent = `Patch: ${currentPatchName}`;
   }
 
   // The "demo" patch is what loads by default -- seeded into the backend
@@ -1036,57 +1031,62 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
     const demo = await loadPatch(demoSummary.id);
     applyTempoState(await applyPatch(model, audioContext, demo, rowSampleIds));
     syncTopBarFromModel();
-    patchNameEl.value = demo.name;
+    currentPatchName = demo.name;
+    updatePatchButtonLabel();
   }
-  await refreshPatchList();
+  await refreshAvailablePatches();
   await refreshAvailableSamples();
   await refreshInstrumentPresets();
   await refreshEffectChainPresets();
   view.render();
   renderLibraryPanels();
+  patchButtonEl.disabled = false;
 
-  savePatchButtonEl.addEventListener("click", async () => {
-    const name = patchNameEl.value.trim();
-    if (!name) {
-      patchStatusEl.textContent = "Enter a name first";
-      return;
-    }
-    const patchData = serializePatch(model, currentTempoState(), rowSampleIds);
-    try {
-      await savePatch({ ...patchData, name });
-    } catch (err) {
-      if (err instanceof SaveConflictError) {
-        if (err.status === 403) {
-          patchStatusEl.textContent =
-            "Can't overwrite the demo patch — choose a different name";
-          return;
+  patchButtonEl.addEventListener("click", async () => {
+    await refreshAvailablePatches();
+    openPatchModal(currentPatchName, availablePatches, {
+      onSave: async (name) => {
+        const patchData = serializePatch(
+          model,
+          currentTempoState(),
+          rowSampleIds,
+        );
+        try {
+          await savePatch({ ...patchData, name });
+        } catch (err) {
+          if (err instanceof SaveConflictError) {
+            if (err.status === 403) {
+              return {
+                ok: false,
+                message:
+                  "Can't overwrite the demo patch — choose a different name",
+              };
+            }
+            if (!window.confirm(`"${name}" already exists. Overwrite?`)) {
+              return { ok: false, message: "Save cancelled" };
+            }
+            await savePatch({ ...patchData, name }, { overwrite: true });
+          } else {
+            return { ok: false, message: "Save failed — try again" };
+          }
         }
-        if (!window.confirm(`"${name}" already exists. Overwrite?`)) return;
-        await savePatch({ ...patchData, name }, { overwrite: true });
-      } else {
-        patchStatusEl.textContent = "Save failed — try again";
-        return;
-      }
-    }
-    await refreshPatchList();
-    patchStatusEl.textContent = "Saved";
-  });
-
-  loadPatchButtonEl.addEventListener("click", async () => {
-    const id = patchSelectEl.value;
-    if (!id) return;
-    if (!window.confirm("Loading will replace the current grid. Continue?")) {
-      return;
-    }
-    const patchData = await loadPatch(id);
-    applyTempoState(
-      await applyPatch(model, audioContext, patchData, rowSampleIds),
-    );
-    syncTopBarFromModel();
-    patchNameEl.value = patchData.name;
-    view.render();
-    renderLibraryPanels();
-    patchStatusEl.textContent = "Loaded";
+        currentPatchName = name;
+        updatePatchButtonLabel();
+        await refreshAvailablePatches();
+        return { ok: true };
+      },
+      onLoad: async (id) => {
+        const patchData = await loadPatch(id);
+        applyTempoState(
+          await applyPatch(model, audioContext, patchData, rowSampleIds),
+        );
+        syncTopBarFromModel();
+        currentPatchName = patchData.name;
+        updatePatchButtonLabel();
+        view.render();
+        renderLibraryPanels();
+      },
+    });
   });
 
   wireNumberInput(bpmEl, () => model.setStepSeconds(computeStepSeconds()));
