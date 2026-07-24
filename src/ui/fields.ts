@@ -40,15 +40,6 @@ export type Field =
       max?: number;
       step?: number;
       indented?: boolean;
-      /** Fires onChange on blur/Enter instead of every "input" event --
-       * for a caller whose onChange rebuilds this same fields list (e.g.
-       * effectsFields' range-editor inputs, whose onChange changes a
-       * slider's own min/max elsewhere in this list). A live "input"
-       * listener would tear this input down mid-keystroke the same way a
-       * "range" field's own drag would abort under a synchronous rebuild
-       * (see this file's own top comment). Defaults to false (live
-       * "input"), unchanged from every existing caller. */
-      commitOnBlur?: boolean;
       onChange: (value: number) => void;
     }
   | {
@@ -261,17 +252,34 @@ function renderField(container: HTMLElement, field: Field): void {
     if (field.max !== undefined) input.max = String(field.max);
     if (field.step !== undefined) input.step = String(field.step);
     input.value = String(field.value);
-    if (field.commitOnBlur) {
-      const commit = () => field.onChange(Number(input.value));
-      input.addEventListener("blur", commit);
-      input.addEventListener("keydown", (event) => {
-        if (event.key !== "Enter") return;
-        commit();
-        input.blur();
-      });
-    } else {
-      input.addEventListener("input", () => field.onChange(Number(input.value)));
-    }
+    // Commits on blur/Enter, not on every "input" keystroke -- typing a
+    // fresh value (clearing "80" to type "120") would otherwise apply
+    // every intermediate state (empty, "1", "12") to the model before the
+    // intended value is even finished, and a caller whose onChange
+    // rebuilds this same fields list (e.g. effectsFields' range-editor
+    // inputs) would tear this input down mid-keystroke entirely. Empty/
+    // unparseable input reverts to field.value (the last real value this
+    // field was rendered with) rather than ever committing NaN/0; a
+    // valid-but-out-of-range number clamps to min/max instead.
+    const commit = () => {
+      const raw = input.value.trim();
+      const parsed = Number(raw);
+      if (raw === "" || Number.isNaN(parsed)) {
+        input.value = String(field.value);
+        return;
+      }
+      const min = field.min ?? Number.NEGATIVE_INFINITY;
+      const max = field.max ?? Number.POSITIVE_INFINITY;
+      const clamped = Math.min(Math.max(parsed, min), max);
+      input.value = String(clamped);
+      field.onChange(clamped);
+    };
+    input.addEventListener("blur", commit);
+    input.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter") return;
+      commit();
+      input.blur();
+    });
     row.appendChild(input);
   } else if (field.kind === "automation") {
     row.classList.add("panel-field-wide");

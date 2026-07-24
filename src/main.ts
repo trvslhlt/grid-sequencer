@@ -155,6 +155,48 @@ for (const [scaleType, label] of Object.entries(SCALE_LABELS)) {
   scaleSelectEl.appendChild(option);
 }
 
+/** Commits a native <input type="number"> on blur/Enter, not on every
+ * "input" keystroke -- typing a fresh value (e.g. clearing "80" to type
+ * "120") would otherwise apply every intermediate state (empty, "1",
+ * "12") to the model before the intended value is even finished, which
+ * is exactly what made Tempo/Steps briefly snap to 0/1 mid-edit before
+ * this existed. Mirrors fields.ts's own "number" Field kind -- #bpm and
+ * #column-count are the only numeric entry inputs in this app that live
+ * outside that abstraction (plain top-bar elements, not built through
+ * renderFields). Reverts to whatever the field held when editing began
+ * (captured on focus, so it stays correct even if something else set
+ * .value externally in between edits, e.g. applyTempoState on patch
+ * load) for empty/unparseable input; clamps a valid-but-out-of-range
+ * number to the input's own min/max instead. */
+function wireNumberInput(
+  input: HTMLInputElement,
+  onCommit: (value: number) => void,
+): void {
+  let valueBeforeEdit = input.value;
+  input.addEventListener("focus", () => {
+    valueBeforeEdit = input.value;
+  });
+  const commit = () => {
+    const raw = input.value.trim();
+    const parsed = Number(raw);
+    if (raw === "" || Number.isNaN(parsed)) {
+      input.value = valueBeforeEdit;
+      return;
+    }
+    const min = input.min === "" ? Number.NEGATIVE_INFINITY : Number(input.min);
+    const max = input.max === "" ? Number.POSITIVE_INFINITY : Number(input.max);
+    const clamped = Math.min(Math.max(parsed, min), max);
+    input.value = String(clamped);
+    onCommit(clamped);
+  };
+  input.addEventListener("blur", commit);
+  input.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return;
+    commit();
+    input.blur();
+  });
+}
+
 function computeStepSeconds(): number {
   const bpm = Math.max(1, Number(bpmEl.value));
   const subdivisionsPerBeat = Number(subdivisionEl.value);
@@ -1057,17 +1099,13 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
     patchStatusEl.textContent = "Loaded";
   });
 
-  bpmEl.addEventListener("input", () =>
-    model.setStepSeconds(computeStepSeconds()),
-  );
+  wireNumberInput(bpmEl, () => model.setStepSeconds(computeStepSeconds()));
   subdivisionEl.addEventListener("change", () =>
     model.setStepSeconds(computeStepSeconds()),
   );
 
-  columnCountEl.addEventListener("change", () => {
-    const count = Math.round(Number(columnCountEl.value));
-    if (count < 1) return;
-    model.setColumnCount(count);
+  wireNumberInput(columnCountEl, (value) => {
+    model.setColumnCount(Math.round(value));
     view.render();
   });
 

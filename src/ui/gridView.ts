@@ -696,7 +696,6 @@ function openParamRangeModal(
         min: hard.min,
         max: hard.max,
         step,
-        commitOnBlur: true,
         onChange: (v) => {
           onCommit(v, getActive().max);
           renderBody();
@@ -710,7 +709,6 @@ function openParamRangeModal(
         min: hard.min,
         max: hard.max,
         step,
-        commitOnBlur: true,
         onChange: (v) => {
           onCommit(getActive().min, v);
           renderBody();
