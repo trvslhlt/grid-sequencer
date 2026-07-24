@@ -155,19 +155,25 @@ for (const [scaleType, label] of Object.entries(SCALE_LABELS)) {
   scaleSelectEl.appendChild(option);
 }
 
-/** Commits a native <input type="number"> on blur/Enter, not on every
- * "input" keystroke -- typing a fresh value (e.g. clearing "80" to type
- * "120") would otherwise apply every intermediate state (empty, "1",
- * "12") to the model before the intended value is even finished, which
- * is exactly what made Tempo/Steps briefly snap to 0/1 mid-edit before
- * this existed. Mirrors fields.ts's own "number" Field kind -- #bpm and
- * #column-count are the only numeric entry inputs in this app that live
- * outside that abstraction (plain top-bar elements, not built through
- * renderFields). Reverts to whatever the field held when editing began
- * (captured on focus, so it stays correct even if something else set
- * .value externally in between edits, e.g. applyTempoState on patch
- * load) for empty/unparseable input; clamps a valid-but-out-of-range
- * number to the input's own min/max instead. */
+/** Commits a native <input type="number"> on native "change", not on
+ * every "input" keystroke -- typing a fresh value (e.g. clearing "80" to
+ * type "120") would otherwise apply every intermediate state (empty,
+ * "1", "12") to the model before the intended value is even finished,
+ * which is exactly what made Tempo/Steps briefly snap to 0/1 mid-edit
+ * before this existed. "change" (rather than "blur") is what makes the
+ * spinner arrows/Up/Down keys still feel immediate: for a number input,
+ * typing only fires "change" once, on blur, but a step adjustment fires
+ * it right away with no blur involved -- using "blur" here instead would
+ * have made arrow-key steps feel unresponsive, needing an extra click
+ * elsewhere before a step actually took effect. Mirrors fields.ts's own
+ * "number" Field kind -- #bpm and #column-count are the only numeric
+ * entry inputs in this app that live outside that abstraction (plain
+ * top-bar elements, not built through renderFields). Reverts to
+ * whatever the field held when editing began (captured on focus, so it
+ * stays correct even if something else set .value externally in between
+ * edits, e.g. applyTempoState on patch load) for empty/unparseable
+ * input; clamps a valid-but-out-of-range number to the input's own
+ * min/max instead. */
 function wireNumberInput(
   input: HTMLInputElement,
   onCommit: (value: number) => void,
@@ -189,7 +195,7 @@ function wireNumberInput(
     input.value = String(clamped);
     onCommit(clamped);
   };
-  input.addEventListener("blur", commit);
+  input.addEventListener("change", commit);
   input.addEventListener("keydown", (event) => {
     if (event.key !== "Enter") return;
     commit();

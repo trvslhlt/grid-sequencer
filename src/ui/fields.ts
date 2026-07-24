@@ -252,12 +252,16 @@ function renderField(container: HTMLElement, field: Field): void {
     if (field.max !== undefined) input.max = String(field.max);
     if (field.step !== undefined) input.step = String(field.step);
     input.value = String(field.value);
-    // Commits on blur/Enter, not on every "input" keystroke -- typing a
-    // fresh value (clearing "80" to type "120") would otherwise apply
-    // every intermediate state (empty, "1", "12") to the model before the
-    // intended value is even finished, and a caller whose onChange
-    // rebuilds this same fields list (e.g. effectsFields' range-editor
-    // inputs) would tear this input down mid-keystroke entirely. Empty/
+    // Native "change" (not "blur", and not the live "input"): typing a
+    // fresh value (clearing "80" to type "120") only fires "change" once,
+    // on blur -- so raw keystrokes never apply an intermediate state
+    // (empty, "1", "12") to the model before the intended value is even
+    // finished, and a caller whose onChange rebuilds this same fields
+    // list (e.g. effectsFields' range-editor inputs) won't tear this
+    // input down mid-keystroke. But the spinner arrows/Up/Down keys fire
+    // "change" immediately per step, with no blur at all -- using "blur"
+    // here instead would have made those feel unresponsive, needing a
+    // separate click elsewhere before a step actually took effect. Empty/
     // unparseable input reverts to field.value (the last real value this
     // field was rendered with) rather than ever committing NaN/0; a
     // valid-but-out-of-range number clamps to min/max instead.
@@ -274,7 +278,7 @@ function renderField(container: HTMLElement, field: Field): void {
       input.value = String(clamped);
       field.onChange(clamped);
     };
-    input.addEventListener("blur", commit);
+    input.addEventListener("change", commit);
     input.addEventListener("keydown", (event) => {
       if (event.key !== "Enter") return;
       commit();
