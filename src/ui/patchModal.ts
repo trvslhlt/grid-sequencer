@@ -24,9 +24,18 @@ export interface PatchModalCallbacks {
 
 export function openPatchModal(
   currentName: string,
+  isDirty: boolean,
   patches: PatchSummary[],
   callbacks: PatchModalCallbacks,
 ): void {
+  // Local, not just the passed-in params -- a successful Save inside this
+  // same popup session (possibly under a new name) flips it clean and
+  // renames it without needing to close and reopen, so the title and the
+  // Load button's confirm message both stay accurate for whatever's true
+  // *right now*, not just at open time.
+  let dirty = isDirty;
+  let displayName = currentName;
+
   const overlay = document.createElement("div");
   overlay.className = "modal-overlay";
   const modal = document.createElement("div");
@@ -44,7 +53,10 @@ export function openPatchModal(
   header.className = "modal-header";
   const title = document.createElement("span");
   title.className = "modal-title";
-  title.textContent = `Patch: ${currentName}`;
+  function updateTitle(): void {
+    title.textContent = `Patch: ${displayName}${dirty ? " *" : ""}`;
+  }
+  updateTitle();
   const closeButton = document.createElement("button");
   closeButton.textContent = "×";
   closeButton.className = "modal-close-button";
@@ -105,9 +117,10 @@ export function openPatchModal(
   loadButton.disabled = patches.length === 0;
   loadButton.addEventListener("click", async () => {
     if (!selectedId) return;
-    if (!window.confirm("Loading will replace the current grid. Continue?")) {
-      return;
-    }
+    const confirmMessage = dirty
+      ? `"${displayName}" has unsaved changes that will be lost. Load a different patch anyway?`
+      : "Loading will replace the current grid. Continue?";
+    if (!window.confirm(confirmMessage)) return;
     statusEl.textContent = "Loading…";
     try {
       await callbacks.onLoad(selectedId);
@@ -130,6 +143,11 @@ export function openPatchModal(
     statusEl.textContent = "Saving…";
     const result = await callbacks.onSave(name);
     statusEl.textContent = result.ok ? "Saved" : result.message;
+    if (result.ok) {
+      dirty = false;
+      displayName = name;
+      updateTitle();
+    }
   });
   footer.appendChild(saveButton);
 

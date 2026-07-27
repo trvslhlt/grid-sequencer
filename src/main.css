@@ -30,6 +30,15 @@ body {
   margin: 0;
 }
 
+/* Unsaved changes (see main.ts's isDirty/markSaved) -- treated like an
+ * uncompleted webform: a visible cue here, plus the "*" suffix in the
+ * label itself so the signal isn't color-only, and a native
+ * beforeunload warning if you try to navigate away with this showing. */
+.patch-button-dirty {
+  box-shadow: 0 0 0 2px #ffb454;
+  border-color: #ffb454;
+}
+
 /* Green + play glyph when stopped (click starts), red + stop glyph while
  * playing (click stops) -- one button standing in for the old separate
  * Play/Stop pair, its own color carrying the state instead of a label. */

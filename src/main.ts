@@ -906,8 +906,45 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
   }
 
   let currentPatchName = "";
+
+  // "Unsaved changes" tracking, treated like an uncompleted webform (see
+  // the beforeunload listener and openPatchModal's own dirty-aware load
+  // confirm below) -- a snapshot comparison rather than a flag flipped by
+  // every individual mutating action. This app has dozens of those
+  // (cell/row/column edits, effect chains, tempo, key/scale...), many of
+  // them entirely internal to gridView.ts's own closure with no hook
+  // main.ts could see; missing even one would silently under-report
+  // "clean" and defeat the whole point of warning before lost work. A
+  // snapshot comparison can't miss anything since it doesn't care *how*
+  // the model changed, only *whether* it currently differs from what's
+  // on disk -- and it correctly un-dirties itself if an edit gets undone
+  // back to the saved state, which a simple mutation-flag never would.
+  let savedSnapshot = "";
+  let isDirty = false;
+
+  function currentSnapshot(): string {
+    return JSON.stringify(
+      serializePatch(model, currentTempoState(), rowSampleIds),
+    );
+  }
+
+  // Called on a plain interval (see the setInterval below), not from
+  // every mutation site -- see the doc above for why. Once a second is
+  // imperceptible for anything a human is doing by hand in this UI.
+  function updateDirtyState(): void {
+    isDirty = currentSnapshot() !== savedSnapshot;
+    updatePatchButtonLabel();
+  }
+
+  function markSaved(): void {
+    savedSnapshot = currentSnapshot();
+    isDirty = false;
+    updatePatchButtonLabel();
+  }
+
   function updatePatchButtonLabel(): void {
-    patchButtonEl.textContent = `Patch: ${currentPatchName}`;
+    patchButtonEl.textContent = `Patch: ${currentPatchName}${isDirty ? " *" : ""}`;
+    patchButtonEl.classList.toggle("patch-button-dirty", isDirty);
   }
 
   // The "demo" patch is what loads by default -- seeded into the backend
@@ -1032,7 +1069,7 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
     applyTempoState(await applyPatch(model, audioContext, demo, rowSampleIds));
     syncTopBarFromModel();
     currentPatchName = demo.name;
-    updatePatchButtonLabel();
+    markSaved();
   }
   await refreshAvailablePatches();
   await refreshAvailableSamples();
@@ -1042,9 +1079,21 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
   renderLibraryPanels();
   patchButtonEl.disabled = false;
 
+  // Polling, not a hook on every mutation -- see markSaved/updateDirtyState's
+  // own doc for why. beforeunload is the browser-native "uncompleted
+  // webform" warning (its message text is fixed by the browser itself,
+  // ignoring whatever's assigned to returnValue -- every modern browser
+  // does this deliberately, to stop sites spamming a custom message).
+  setInterval(updateDirtyState, 1000);
+  window.addEventListener("beforeunload", (event) => {
+    if (!isDirty) return;
+    event.preventDefault();
+    event.returnValue = "";
+  });
+
   patchButtonEl.addEventListener("click", async () => {
     await refreshAvailablePatches();
-    openPatchModal(currentPatchName, availablePatches, {
+    openPatchModal(currentPatchName, isDirty, availablePatches, {
       onSave: async (name) => {
         const patchData = serializePatch(
           model,
@@ -1071,7 +1120,7 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
           }
         }
         currentPatchName = name;
-        updatePatchButtonLabel();
+        markSaved();
         await refreshAvailablePatches();
         return { ok: true };
       },
@@ -1082,7 +1131,7 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
         );
         syncTopBarFromModel();
         currentPatchName = patchData.name;
-        updatePatchButtonLabel();
+        markSaved();
         view.render();
         renderLibraryPanels();
       },
