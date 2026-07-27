@@ -1,6 +1,6 @@
 .PHONY: up down restart logs shell lint format typecheck build-image run-image verify \
 	bruit-kit-build backend-logs backend-shell backend-typecheck build-image-backend run-image-backend \
-	seed-samples seed-base-samples
+	seed-samples seed-base-samples seed-demo-patches
 
 # bruit-kit is bind-mounted read-only into this project's dev container
 # (see docker-compose.yml) rather than copied in, so its own Docker setup
@@ -67,6 +67,14 @@ seed-samples:
 # already present by name+category instead of piling up duplicates.
 seed-base-samples:
 	node scripts/seed-base-samples.mjs
+
+# Saves 10 ready-to-load demo patches spanning noise to simple/pretty
+# musical (see scripts/seed-demo-patches.mjs's own doc) -- requires
+# seed-base-samples (or an equivalent library) to already be populated,
+# since these reference real sample names by lookup. Idempotent by name:
+# overwrite:true's its own 10 "Demo: ..." patches, safe to re-run.
+seed-demo-patches:
+	node scripts/seed-demo-patches.mjs
 
 # --- backend equivalents ---
 
