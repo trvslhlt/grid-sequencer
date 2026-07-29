@@ -244,12 +244,48 @@ input:disabled {
   text-decoration: line-through;
 }
 
+/* Silenced because some *other* row is soloed, not because this one is
+ * muted -- a lighter dim than .off so the two reasons a row is currently
+ * silent stay visually distinct (see gridView.ts's soloActive). */
+.master-cell.solo-dimmed {
+  opacity: 0.5;
+}
+
 .master-cell.selected {
   box-shadow: 0 0 0 2px #4c7dff;
 }
 
 .row-master {
-  justify-content: flex-start;
+  justify-content: space-between;
+}
+
+.row-master-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.solo-button {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border-radius: 3px;
+  border: 1px solid #454b60;
+  background: #23262f;
+  color: #6a6f7a;
+  font-size: 0.65rem;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.solo-button.active {
+  background: #e6c34a;
+  border-color: #e6c34a;
+  color: #1a1c22;
 }
 
 .cell {

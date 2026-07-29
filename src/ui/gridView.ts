@@ -1286,6 +1286,19 @@ export function createGridView(
           render();
         },
       },
+      {
+        // Not persisted, not part of RowConfig -- see RowRuntime's own doc
+        // on why solo resets to "none" on every patch load instead of
+        // round-tripping through save/load.
+        key: "solo",
+        label: "Solo",
+        kind: "checkbox",
+        value: row.isSoloed(),
+        onChange: (v) => {
+          model.setRowSolo(row, v);
+          render();
+        },
+      },
     ];
 
     if (row.config.sourceType === "samplePlayer") {
@@ -1808,12 +1821,16 @@ export function createGridView(
     });
 
     cellEls = [];
+    // Whether *any* row is soloed right now -- drives every non-soloed
+    // row's dimmed-by-solo look, distinct from that row's own mute state
+    // (see fireTick's identical soloActive check for the audio side).
+    const soloActive = rows.some((r) => r.isSoloed());
     for (const row of rows) {
       const rowMaster = document.createElement("div");
       const rowSelected =
         selection?.kind === "row" && selection.rowId === row.id;
-      rowMaster.className = `master-cell row-master${row.config.enabled ? "" : " off"}${rowSelected ? " selected" : ""}`;
-      rowMaster.textContent = row.config.name;
+      const silencedBySolo = soloActive && !row.isSoloed();
+      rowMaster.className = `master-cell row-master${row.config.enabled ? "" : " off"}${silencedBySolo ? " solo-dimmed" : ""}${rowSelected ? " selected" : ""}`;
       rowMaster.title = SOURCE_TYPE_LABELS[row.config.sourceType];
       rowMaster.addEventListener("click", () => {
         model.setRowEnabled(row, !row.config.enabled);
@@ -1823,6 +1840,25 @@ export function createGridView(
         event.preventDefault();
         select({ kind: "row", rowId: row.id });
       });
+
+      const rowMasterName = document.createElement("span");
+      rowMasterName.className = "row-master-name";
+      rowMasterName.textContent = row.config.name;
+      rowMaster.appendChild(rowMasterName);
+
+      const soloButton = document.createElement("button");
+      soloButton.className = `solo-button${row.isSoloed() ? " active" : ""}`;
+      soloButton.textContent = "S";
+      soloButton.title = row.isSoloed() ? "Unsolo" : "Solo (isolate this row)";
+      soloButton.addEventListener("click", (event) => {
+        // Solo lives in the same cell as the mute-toggle click above --
+        // stopPropagation so clicking S doesn't also flip mute.
+        event.stopPropagation();
+        model.setRowSolo(row, !row.isSoloed());
+        render();
+      });
+      rowMaster.appendChild(soloButton);
+
       grid.appendChild(rowMaster);
 
       const rowCellEls: HTMLDivElement[] = [];

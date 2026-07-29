@@ -150,11 +150,18 @@ interface RowRuntime {
   sampleBuffer: AudioBuffer | undefined;
   active: boolean;
   pendingCycleLength: number | null;
+  /** Deliberately not part of RowConfig/PatchRow -- solo is a live
+   * audition tool (isolate what one row sounds like without losing every
+   * other row's mute state), not song data, so it resets to "none soloed"
+   * on every patch load rather than round-tripping through save/load or
+   * counting toward the unsaved-changes dirty check. See fireTick's own
+   * use of it for the actual silencing behavior. */
+  solo: boolean;
 }
 
 export type Row = Readonly<
   Pick<RowRuntime, "id" | "config" | "source" | "cells">
-> & { isActive(): boolean };
+> & { isActive(): boolean; isSoloed(): boolean };
 
 /** Everything one running grid needs: the shared clock (see bruit-kit's
  * stepClock.ts doc for why rows never own their own), the shared send
@@ -387,6 +394,7 @@ export class GridModel {
       sampleBuffer: undefined,
       active: !joinAtNextCycle,
       pendingCycleLength: joinAtNextCycle ? this.columnCount : null,
+      solo: false,
     };
     this.rows.push(runtime);
     return this.toRow(runtime);
@@ -429,6 +437,15 @@ export class GridModel {
   setRowEnabled(row: Row, enabled: boolean): void {
     const runtime = this.findRuntime(row);
     if (runtime) runtime.config = { ...runtime.config, enabled };
+  }
+
+  /** Solo isn't exclusive -- toggling one row's solo on leaves any other
+   * already-soloed row soloed too, same "click several to A/B a subset"
+   * convention as every mixing console/DAW's own solo. See RowRuntime's
+   * own doc for why this lives outside RowConfig entirely. */
+  setRowSolo(row: Row, solo: boolean): void {
+    const runtime = this.findRuntime(row);
+    if (runtime) runtime.solo = solo;
   }
 
   setRowName(row: Row, name: string): void {
@@ -589,6 +606,7 @@ export class GridModel {
       source: runtime.source,
       cells: runtime.cells,
       isActive: () => runtime.active,
+      isSoloed: () => runtime.solo,
     };
   }
 
@@ -613,6 +631,10 @@ export class GridModel {
   ): void {
     const columnIndex = stepIndex % this.columnCount;
     const column = this.columns[columnIndex];
+    // Computed once per tick, not per row -- solo isn't exclusive (see
+    // setRowSolo), so "does *any* row have solo on" is what actually gates
+    // every other row, not any single row's own flag.
+    const soloActive = this.rows.some((r) => r.solo);
     for (const runtime of this.rows) {
       if (
         runtime.pendingCycleLength !== null &&
@@ -622,6 +644,7 @@ export class GridModel {
         runtime.pendingCycleLength = null;
       }
       if (!runtime.active) continue;
+      if (soloActive && !runtime.solo) continue;
 
       const cell = runtime.cells[columnIndex];
       const rowDefaultGate = triggerModeGate(runtime.config.triggerMode);
