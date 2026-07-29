@@ -357,7 +357,21 @@ export class GridModel {
     const envelopeGain = this.audioContext.createGain();
     envelopeGain.gain.value = 0;
     source.output.connect(envelopeGain);
-    const chain = this.chainCache.acquire(config.effects);
+    // A dedicated chain, not this.chainCache's shared-by-config instances --
+    // sendLevel's own doc says "this row's (post-effects) output," and a
+    // send tap has to read a signal that's genuinely only this row's own.
+    // The cache is a correct optimization for the dry path (two rows with
+    // identical effects sharing one node is fine there, since dry signals
+    // are meant to sum into the master bus anyway) but is wrong for a
+    // per-row send tap: two rows sharing a chain means their signals are
+    // already mixed together inside it, so tapping that shared node's
+    // output leaks every row sharing it into whichever row's send happens
+    // to be turned up, regardless of the others' own send levels. Cell-level
+    // effect overrides (fireSamplePlayerOverride) have no per-cell send and
+    // so can still safely use the cache. Rows are also few enough (unlike
+    // cells across a big grid) that not de-duping them costs little.
+    const chain = buildEffectsChain(this.audioContext, config.effects);
+    chain.output.connect(this.masterGain);
     envelopeGain.connect(chain.input);
     const send = createSend(this.audioContext, this.sendBusInput, 0);
     chain.output.connect(send.input);
@@ -383,14 +397,11 @@ export class GridModel {
     if (!runtime) return;
     runtime.source.output.disconnect();
     runtime.envelopeGain.disconnect();
-    // The chain may still be shared with another row (same effective
-    // config), so only sever this row's own edge into it rather than a
-    // blanket chain.output.disconnect() -- that would silence the other
-    // row's dry path too. chainCache.release only tears the chain down
-    // once nothing else references it.
-    runtime.chain.output.disconnect(runtime.send.input);
     runtime.send.input.disconnect();
-    this.chainCache.release(runtime.config.effects);
+    // Never shared with anything else (see addRow's own doc), so a blanket
+    // dispose is safe -- no other row's dry path or send routes through
+    // this same chain instance.
+    runtime.chain.dispose();
     this.rows.splice(this.rows.indexOf(runtime), 1);
   }
 
@@ -523,26 +534,22 @@ export class GridModel {
     if (runtime.source.loadSample) void runtime.source.loadSample(buffer);
   }
 
-  /** Re-acquires the cache entry for the *new* effects config before
-   * releasing the old one -- acquire-before-release means a chain another
-   * row still references (or this row's own unchanged config) is never
-   * torn down and immediately rebuilt. */
+  /** Same build-before-dispose-shaped rebuild as setMasterEffects/
+   * setSendBusEffects, just against a per-row dedicated chain instead of
+   * the always-present master/send ones (see addRow's own doc for why rows
+   * don't go through the shared chainCache). Never shared with anything
+   * else, so a blanket oldChain.dispose() is safe -- no acquire/release
+   * ref-counting needed the way cell-level overrides still need it. */
   setRowEffects(row: Row, effects: RowConfig["effects"]): void {
     const runtime = this.findRuntime(row);
     if (!runtime) return;
-    const oldEffects = runtime.config.effects;
     const oldChain = runtime.chain;
-    const newChain = this.chainCache.acquire(effects);
+    const newChain = buildEffectsChain(this.audioContext, effects);
+    newChain.output.connect(this.masterGain);
+    newChain.output.connect(runtime.send.input);
     runtime.envelopeGain.disconnect();
     runtime.envelopeGain.connect(newChain.input);
-    // Sever only the old chain's own edge into this row's send tap -- not
-    // send.input.disconnect(), which would sever send.input's *outgoing*
-    // edge to the send bus instead and silently kill this row's send
-    // for good (the old chain might still be shared with another
-    // row, so a blanket oldChain.output.disconnect() isn't safe either).
-    oldChain.output.disconnect(runtime.send.input);
-    newChain.output.connect(runtime.send.input);
-    this.chainCache.release(oldEffects);
+    oldChain.dispose();
     runtime.config = { ...runtime.config, effects };
     runtime.chain = newChain;
   }
