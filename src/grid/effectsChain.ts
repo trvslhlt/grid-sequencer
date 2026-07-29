@@ -9,6 +9,7 @@ import {
   FlangerEffect,
   GainEffect,
   PhaserEffect,
+  PitchShiftEffect,
   ReverbEffect,
   RingModulationEffect,
   TremoloEffect,
@@ -92,6 +93,19 @@ function instantiateEffect(
     }
     case "reverb": {
       const fx = new ReverbEffect(audioContext);
+      fx.setParams({ wet: 1, ...spec.params });
+      return fx;
+    }
+    case "pitchShift": {
+      // Unlike every other effect here, this one requires the caller to
+      // have already awaited preloadPitchShiftWorklet(audioContext) for
+      // this exact context (real-time or offline) -- see PitchShiftEffect's
+      // own doc comment for why its constructor can't do that lazily the
+      // way GranularSynth's async init() does. main.ts preloads once on
+      // the shared real-time AudioContext at startup; sampleEditorModal.ts's
+      // renderEffectsOffline preloads on its own fresh OfflineAudioContext
+      // whenever pitchShift appears among the effects being baked.
+      const fx = new PitchShiftEffect(audioContext);
       fx.setParams({ wet: 1, ...spec.params });
       return fx;
     }

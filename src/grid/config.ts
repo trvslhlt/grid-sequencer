@@ -14,7 +14,8 @@ export type EffectType =
   | "phaser"
   | "autoWah"
   | "bitcrusher"
-  | "reverb";
+  | "reverb"
+  | "pitchShift";
 
 export interface EffectSpec {
   type: EffectType;

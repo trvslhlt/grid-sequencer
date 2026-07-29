@@ -10,9 +10,13 @@
  * samples isn't cluttered with a full operations panel repeated on every
  * row; editing now happens in one place instead. */
 
+import { preloadPitchShiftWorklet } from "bruit-kit/audio";
 import { type WaveformRange, createWaveformRangeView } from "bruit-kit/ui";
 import type { EffectSpec } from "../grid/config";
-import { type BuiltEffectsChain, buildEffectsChain } from "../grid/effectsChain";
+import {
+  type BuiltEffectsChain,
+  buildEffectsChain,
+} from "../grid/effectsChain";
 import { reverseAudioBuffer } from "../grid/gridModel";
 import type { SampleMetadata } from "../patchApi";
 import { type Field, renderFields } from "./fields";
@@ -88,7 +92,8 @@ function estimateTailSeconds(effects: EffectSpec[]): number {
       const feedback =
         typeof spec.params.feedback === "number" ? spec.params.feedback : 0.35;
       // Repeats until the echo drops below ~1% amplitude.
-      const repeats = feedback > 0.001 ? Math.log(0.01) / Math.log(feedback) : 1;
+      const repeats =
+        feedback > 0.001 ? Math.log(0.01) / Math.log(feedback) : 1;
       tail = Math.max(tail, delaySeconds * (repeats + 1));
     }
   }
@@ -108,14 +113,20 @@ async function renderEffectsOffline(
   effects: EffectSpec[],
 ): Promise<AudioBuffer> {
   const tailSeconds = estimateTailSeconds(effects);
-  const length = Math.ceil(
-    (buffer.duration + tailSeconds) * buffer.sampleRate,
-  );
+  const length = Math.ceil((buffer.duration + tailSeconds) * buffer.sampleRate);
   const offlineContext = new OfflineAudioContext(
     buffer.numberOfChannels,
     length,
     buffer.sampleRate,
   );
+  // Worklet registration is scoped per-context, not global -- this fresh
+  // OfflineAudioContext doesn't inherit the real-time AudioContext's own
+  // preload (see main.ts). Must be awaited *before* buildEffectsChain's
+  // synchronous `new PitchShiftEffect(...)` below, or that constructor
+  // throws (see preloadPitchShiftWorklet's own doc comment).
+  if (effects.some((spec) => spec.type === "pitchShift")) {
+    await preloadPitchShiftWorklet(offlineContext);
+  }
   const source = offlineContext.createBufferSource();
   source.buffer = buffer;
   const chain = buildEffectsChain(
@@ -359,8 +370,7 @@ export function openSampleEditorModal(
       const name = window.prompt("Name the new sample:", `${baseName} copy`);
       if (!name?.trim()) return;
       stopPreview();
-      statusEl.textContent =
-        effects.length > 0 ? "Rendering…" : "Saving…";
+      statusEl.textContent = effects.length > 0 ? "Rendering…" : "Saving…";
       try {
         const finalBuffer = await buildFinalBuffer(original);
         await callbacks.onSaveAsNew(finalBuffer, {

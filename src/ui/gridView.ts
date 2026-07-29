@@ -587,6 +587,58 @@ const EFFECT_TABLE: Array<{
       },
     ],
   },
+  {
+    type: "pitchShift",
+    label: "Pitch shift",
+    params: [
+      {
+        key: "octave",
+        label: "Octave",
+        kind: "range",
+        min: -2,
+        max: 2,
+        step: 1,
+        default: 0,
+        hardMin: -4,
+        hardMax: 4,
+      },
+      {
+        key: "semitones",
+        label: "Semitones",
+        kind: "range",
+        min: -12,
+        max: 12,
+        step: 1,
+        default: 0,
+        hardMin: -24,
+        hardMax: 24,
+      },
+      {
+        key: "cents",
+        label: "Cents",
+        kind: "range",
+        min: -50,
+        max: 50,
+        step: 1,
+        default: 0,
+        // A full semitone is 100 cents -- beyond that, "fine tune" is just
+        // a worse-labeled semitone shift, so this stays capped there even
+        // as a custom range rather than sharing the generic 3x-widened
+        // fallback every other param without an explicit hard bound gets.
+        hardMin: -100,
+        hardMax: 100,
+      },
+      {
+        key: "wet",
+        label: "Wet",
+        kind: "range",
+        min: 0,
+        max: 1,
+        step: 0.01,
+        default: 1,
+      },
+    ],
+  },
 ];
 
 /** The absolute min/max a per-instance custom range (EffectSpec.
@@ -604,7 +656,10 @@ const EFFECT_TABLE: Array<{
  *   negative (Hz, ms, seconds, counts) -- generous enough to "flex
  *   beyond arbitrary hardcoded limits" without being unbounded.
  */
-function hardBoundFor(param: EffectRangeParamSpec): { min: number; max: number } {
+function hardBoundFor(param: EffectRangeParamSpec): {
+  min: number;
+  max: number;
+} {
   if (param.hardMin !== undefined && param.hardMax !== undefined) {
     return { min: param.hardMin, max: param.hardMax };
   }

@@ -1,6 +1,6 @@
 import "bruit-kit/ui/automationEditor.css";
 import "bruit-kit/ui/waveformRangeView.css";
-import { Recorder } from "bruit-kit/audio";
+import { Recorder, preloadPitchShiftWorklet } from "bruit-kit/audio";
 import { getSharedLimiter, unlockAudioContext } from "./audioContext";
 import type { EffectSpec, Precedence } from "./grid/config";
 import { GridModel, type Row } from "./grid/gridModel";
@@ -14,6 +14,7 @@ import { type TempoState, applyPatch, serializePatch } from "./patch";
 import {
   type EffectChainPreset,
   type InstrumentPreset,
+  type PatchSummary,
   SAMPLE_CATEGORIES,
   type SampleMetadata,
   SaveConflictError,
@@ -28,7 +29,6 @@ import {
   listPatches,
   listSamples,
   loadPatch,
-  type PatchSummary,
   replaceSampleAudio,
   savePatch,
   updateEffectChainPreset,
@@ -66,9 +66,8 @@ const SUBDIVISIONS: Array<{ label: string; value: number }> = [
 const unlockEl = document.querySelector<HTMLDivElement>("#unlock")!;
 const appEl = document.querySelector<HTMLDivElement>("#app")!;
 const gridEl = document.querySelector<HTMLDivElement>("#grid")!;
-const playStopButtonEl = document.querySelector<HTMLButtonElement>(
-  "#play-stop-button",
-)!;
+const playStopButtonEl =
+  document.querySelector<HTMLButtonElement>("#play-stop-button")!;
 const masterButtonEl =
   document.querySelector<HTMLButtonElement>("#master-button")!;
 const manageLibraryButtonEl = document.querySelector<HTMLButtonElement>(
@@ -196,6 +195,16 @@ function computeStepSeconds(): number {
 unlockAudioContext(unlockEl).then(async (audioContext) => {
   unlockEl.classList.add("hidden");
   appEl.classList.remove("hidden");
+
+  // Fire-and-forget, as early as possible -- by the time a user could
+  // plausibly add a pitch-shift effect (several more clicks away), this
+  // has long since resolved, so instantiateEffect's synchronous
+  // `new PitchShiftEffect(audioContext)` never races it. See
+  // preloadPitchShiftWorklet's own doc comment for why it can't just be
+  // done lazily inside the effect's constructor instead.
+  preloadPitchShiftWorklet(audioContext).catch((err) => {
+    console.error("Failed to preload pitch-shift worklet:", err);
+  });
 
   const limiter = getSharedLimiter(audioContext);
   // Taps limiter.output, not masterGain -- the exact same node already
