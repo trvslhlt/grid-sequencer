@@ -1,5 +1,5 @@
 import type { EffectSpec, EffectType, EnvelopeParams } from "../grid/config";
-import type { GridModel, Row } from "../grid/gridModel";
+import type { EffectLiveTarget, GridModel, Row } from "../grid/gridModel";
 import { SOURCE_TYPE_LABELS, type SourceType } from "../grid/sourceFactory";
 import {
   TRIGGER_MODE_LABELS,
@@ -710,6 +710,11 @@ function openParamRangeModal(
   step: number,
   onCommit: (min: number, max: number) => void,
   onReset: () => void,
+  // Only present for a param that has a persistent chain to nudge live
+  // (row/master/send-bus, not a per-cell override -- see effectsFields'
+  // own driftTarget doc). Drift wanders within whatever range this same
+  // modal edits, so it lives in this popup rather than a separate control.
+  drift?: { enabled: () => boolean; onToggle: (enabled: boolean) => void },
 ): void {
   const overlay = document.createElement("div");
   overlay.className = "modal-overlay";
@@ -769,6 +774,20 @@ function openParamRangeModal(
           renderBody();
         },
       },
+      ...(drift
+        ? [
+            {
+              key: "drift-enabled",
+              label: "Drift within this range",
+              kind: "checkbox" as const,
+              value: drift.enabled(),
+              onChange: (v: boolean) => {
+                drift.onToggle(v);
+                renderBody();
+              },
+            },
+          ]
+        : []),
     ]);
   }
   renderBody();
@@ -884,6 +903,12 @@ export function effectsFields(
   getEffects: () => EffectSpec[],
   onUpdate: (next: EffectSpec[]) => void,
   onSaveAsPreset?: (effects: EffectSpec[], name: string) => void,
+  // Only set by callers backed by one of the three persistent chains
+  // (row/master/send-bus) -- see gridModel.ts's EffectLiveTarget. Omitted
+  // for a cell's own effects override, which has no persistent chain to
+  // nudge (a fresh one-shot instance per hit, see
+  // fireSamplePlayerOverride), so no Drift control is offered there.
+  driftTarget?: EffectLiveTarget,
 ): Field[] {
   const effects = getEffects();
   const fields: Field[] = [];
@@ -1022,6 +1047,28 @@ export function effectsFields(
           );
         };
 
+        const isDrifting = (): boolean =>
+          getEffects()[index]?.driftParams?.includes(param.key) ?? false;
+
+        const toggleDrift = (enabled: boolean): void => {
+          const current = getEffects();
+          onUpdate(
+            current.map((e, i) => {
+              if (i !== index) return e;
+              const existing = e.driftParams ?? [];
+              const nextDrift = enabled
+                ? existing.includes(param.key)
+                  ? existing
+                  : [...existing, param.key]
+                : existing.filter((k) => k !== param.key);
+              return {
+                ...e,
+                driftParams: nextDrift.length > 0 ? nextDrift : undefined,
+              };
+            }),
+          );
+        };
+
         fields.push({
           key,
           label: param.label,
@@ -1032,6 +1079,7 @@ export function effectsFields(
           step: param.step,
           indented: true,
           labelCustomized: spec.paramRanges?.[param.key] !== undefined,
+          labelDrifting: driftTarget !== undefined && isDrifting(),
           onLabelClick: () =>
             openParamRangeModal(
               param.label,
@@ -1040,6 +1088,9 @@ export function effectsFields(
               param.step,
               commitRange,
               resetRange,
+              driftTarget === undefined
+                ? undefined
+                : { enabled: isDrifting, onToggle: toggleDrift },
             ),
           onChange: (v) => onChange(v / scale),
         });
@@ -1091,6 +1142,165 @@ export function effectsFields(
   }
 
   return fields;
+}
+
+interface DriftState {
+  target: EffectLiveTarget;
+  index: number;
+  type: EffectType;
+  key: string;
+  scale: number;
+  /** Display units (matches activeRangeFor/hardBoundFor's own unit --
+   * see EffectRangeParamSpec's own doc on why min/max/step are display
+   * units while stored/default are the effect class's native unit). */
+  current: number;
+  wanderTarget: number;
+  nextRetargetAt: number;
+  min: number;
+  max: number;
+}
+
+const DRIFT_TICK_MS = 150;
+// Approach-toward-target factor applied each tick -- small enough that a
+// retarget (see randomRetargetDelay) reads as a slow glide, not a jump.
+const DRIFT_LERP = 0.03;
+
+function randomRetargetDelay(): number {
+  return 3000 + Math.random() * 5000;
+}
+
+function driftTargetKey(target: EffectLiveTarget): string {
+  return target.kind === "row" ? `row:${target.rowId}` : target.kind;
+}
+
+/** Runs for the lifetime of the view (started once by createGridView,
+ * never stopped -- matches main.ts's own dirty-check interval; this
+ * app's SPA session has no explicit teardown). Independently re-reads
+ * the model's current effects data every tick rather than caching
+ * anything about "what's drifting" across ticks beyond each param's own
+ * wander position, so toggling Drift on/off, editing a chain, or
+ * removing/reordering an effect all just fall out of always reading
+ * fresh state -- no separate invalidation path needed.
+ *
+ * Bypasses setRowEffects/setMasterEffects/setSendBusEffects's normal
+ * rebuild-the-whole-chain path entirely (see
+ * BuiltEffectsChain.setParamsAt) -- this fires several times a second,
+ * and a full disconnect/reconnect rebuild at that rate would both waste
+ * work and risk an audible click on every tick. */
+function startDriftEngine(model: GridModel): void {
+  const states = new Map<string, DriftState>();
+
+  function collectTargets(): Array<{
+    target: EffectLiveTarget;
+    effects: EffectSpec[];
+  }> {
+    return [
+      { target: { kind: "master" }, effects: model.getMasterEffects() },
+      { target: { kind: "sendBus" }, effects: model.getSendBusEffects() },
+      ...model.getRows().map((row) => ({
+        target: { kind: "row", rowId: row.id } as const,
+        effects: row.config.effects,
+      })),
+    ];
+  }
+
+  setInterval(() => {
+    const targets = collectTargets();
+    const seen = new Set<string>();
+
+    for (const { target, effects } of targets) {
+      effects.forEach((spec, index) => {
+        if (!spec.driftParams?.length) return;
+        const table = EFFECT_TABLE.find((e) => e.type === spec.type);
+        if (!table) return;
+        for (const key of spec.driftParams) {
+          const param = table.params.find(
+            (p): p is EffectRangeParamSpec =>
+              p.key === key && p.kind === "range",
+          );
+          if (!param) continue;
+
+          const stateKey = `${driftTargetKey(target)}:${index}:${spec.type}:${key}`;
+          seen.add(stateKey);
+          const scale = param.scale ?? 1;
+          const active = activeRangeFor(spec, param);
+          let state = states.get(stateKey);
+          if (!state) {
+            const stored = spec.params[key];
+            const baseDisplay =
+              (typeof stored === "number" ? stored : param.default) * scale;
+            state = {
+              target,
+              index,
+              type: spec.type,
+              key,
+              scale,
+              current: baseDisplay,
+              wanderTarget: baseDisplay,
+              nextRetargetAt: Date.now() + randomRetargetDelay(),
+              min: active.min,
+              max: active.max,
+            };
+            states.set(stateKey, state);
+          } else {
+            // The active range may have been (re)customized since the
+            // last tick -- keep wandering, just within whatever bounds
+            // are current now.
+            state.min = active.min;
+            state.max = active.max;
+          }
+
+          const now = Date.now();
+          if (now >= state.nextRetargetAt) {
+            state.wanderTarget =
+              state.min + Math.random() * (state.max - state.min);
+            state.nextRetargetAt = now + randomRetargetDelay();
+          }
+          const delta = (state.wanderTarget - state.current) * DRIFT_LERP;
+          // Once settled near its current wander target, skip pushing an
+          // effectively-unchanged value every 150ms until the next
+          // retarget actually moves it -- (state.max - state.min) scales
+          // the "close enough" threshold to each param's own range instead
+          // of one fixed number working for a 0..1 param and a 200..8000Hz
+          // one equally badly.
+          if (Math.abs(delta) > (state.max - state.min) * 0.0005) {
+            state.current += delta;
+            model.applyLiveEffectParam(
+              target,
+              index,
+              key,
+              state.current / scale,
+            );
+          }
+        }
+      });
+    }
+
+    for (const [stateKey, state] of states) {
+      if (seen.has(stateKey)) continue;
+      // No longer drifting (toggled off, effect removed, or reordered
+      // out from under this index) -- snap back to whatever's actually
+      // saved there now, but only if this index still holds the same
+      // effect type this state was tracking; if some other effect has
+      // since taken that slot, touching it here would misapply this
+      // reset to the wrong instance entirely, so it's skipped instead.
+      const currentSpec = targets.find(
+        (t) => driftTargetKey(t.target) === driftTargetKey(state.target),
+      )?.effects[state.index];
+      if (currentSpec?.type === state.type) {
+        const stored = currentSpec.params[state.key];
+        if (typeof stored === "number") {
+          model.applyLiveEffectParam(
+            state.target,
+            state.index,
+            state.key,
+            stored,
+          );
+        }
+      }
+      states.delete(stateKey);
+    }
+  }, DRIFT_TICK_MS);
 }
 
 /** Envelope is always a single consolidated override (like row/column
@@ -1526,6 +1736,7 @@ export function createGridView(
               render();
             },
             options.onSaveEffectChainPreset,
+            { kind: "row", rowId: row.id },
           ),
         },
       ],
@@ -1992,6 +2203,7 @@ export function createGridView(
   }
 
   render();
+  startDriftEngine(model);
   return {
     render,
     refreshPlayhead,

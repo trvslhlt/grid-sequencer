@@ -32,6 +32,17 @@ export interface EffectSpec {
    * range is what makes "randomize this param" controlled instead of
    * jumping the full hardcoded range every time. */
   paramRanges?: Record<string, { min: number; max: number }>;
+  /** Which of this effect instance's own numeric params should slowly
+   * random-walk on their own while playing (see gridView.ts's drift
+   * engine), wandering within whatever range is active for that param
+   * (paramRanges' custom range if set, else the table default). This is
+   * the intent to persist -- not the live wandering value itself, which
+   * is pushed straight to the running effect instance via
+   * BuiltEffectsChain.setParamsAt and never written back here. Meaningful
+   * to save as part of a patch (unlike solo, see RowRuntime.solo's own
+   * doc): "this reverb's decay wanders" is a sound-design choice, not
+   * session/audition state. */
+  driftParams?: string[];
 }
 
 export interface EnvelopePoint {

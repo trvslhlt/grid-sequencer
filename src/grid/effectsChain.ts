@@ -119,6 +119,17 @@ function instantiateEffect(
  * chain (the cache below ref-counts so that's automatic). */
 export interface BuiltEffectsChain extends ChainableNode {
   dispose(): void;
+  /** Live-nudges one already-instantiated effect's params in place --
+   * bypasses the normal rebuild-the-whole-chain path (a fresh
+   * buildEffectsChain call via setRowEffects/setMasterEffects/
+   * setSendBusEffects), for a caller that needs to update a running
+   * effect smoothly and often (see gridView.ts's drift engine) without
+   * paying a disconnect/reconnect click at that frequency. `index`
+   * matches the position in the same `specs` array this chain was built
+   * from -- a stale index (chain since rebuilt with fewer effects) is a
+   * harmless no-op, not an error, since a drift engine tick always reads
+   * fresh state anyway and will simply stop applying next tick. */
+  setParamsAt(index: number, params: Record<string, number | string>): void;
 }
 
 export function buildEffectsChain(
@@ -133,6 +144,14 @@ export function buildEffectsChain(
     dispose() {
       chain.input.disconnect();
       chain.output.disconnect();
+    },
+    setParamsAt(index, params) {
+      const node = nodes[index] as
+        | (ChainableNode & {
+            setParams?: (p: Record<string, number | string>) => void;
+          })
+        | undefined;
+      node?.setParams?.(params);
     },
   };
 }

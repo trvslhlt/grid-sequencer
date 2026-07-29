@@ -311,6 +311,7 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
             view.render();
           },
           saveEffectChainPreset,
+          { kind: "master" },
         ),
       },
       {
@@ -322,6 +323,7 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
             view.render();
           },
           saveEffectChainPreset,
+          { kind: "sendBus" },
         ),
       },
     ];

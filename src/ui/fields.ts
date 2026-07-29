@@ -67,6 +67,12 @@ export type Field =
        * used elsewhere in this app for "differs from default" (see
        * main.css's .cell.overridden). Meaningless without onLabelClick. */
       labelCustomized?: boolean;
+      /** Visual cue that this param is currently drifting (see
+       * gridView.ts's drift engine) -- a distinct color from
+       * labelCustomized so "has a custom range" and "is actively
+       * wandering right now" read as the two different things they are;
+       * a param can be either, neither, or both at once. */
+      labelDrifting?: boolean;
       onChange: (value: number) => void;
     }
   | {
@@ -259,6 +265,7 @@ function renderField(container: HTMLElement, field: Field): void {
     if (field.onLabelClick) {
       label.classList.add("field-label-clickable");
       if (field.labelCustomized) label.classList.add("field-label-customized");
+      if (field.labelDrifting) label.classList.add("field-label-drifting");
       label.addEventListener("click", field.onLabelClick);
     }
     const { input, valueEl } = renderRangeInput(

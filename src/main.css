@@ -438,6 +438,29 @@ input:disabled {
   color: #ffb454;
 }
 
+/* Signals "this param is currently drifting" (see gridView.ts's drift
+ * engine) -- a different color from .field-label-customized so "has a
+ * custom range" and "is actively wandering" read as the two different
+ * things they are; a param can show both colors' worth of state (drift
+ * wanders *within* whatever range is active, customized or not), so the
+ * pulse rather than the color itself is the primary cue when both apply.
+ * The slider's own value stays at the saved/base number -- only the
+ * actual sound wanders live -- so this pulse is the only visual sign
+ * anything is currently in motion. */
+.field-label-drifting {
+  animation: drift-label-pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes drift-label-pulse {
+  0%,
+  100% {
+    color: #7fe0c4;
+  }
+  50% {
+    color: #3a9b7d;
+  }
+}
+
 .panel-field input[type="range"] {
   width: 100px;
 }

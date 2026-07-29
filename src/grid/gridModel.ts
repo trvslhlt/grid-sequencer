@@ -163,6 +163,16 @@ export type Row = Readonly<
   Pick<RowRuntime, "id" | "config" | "source" | "cells">
 > & { isActive(): boolean; isSoloed(): boolean };
 
+/** Names one of the three persistent effects chains applyLiveEffectParam
+ * can reach -- exported so gridView.ts's drift engine (the only caller
+ * outside this file) can build one without redeclaring the shape. Cell
+ * effect overrides have no persistent chain (a fresh one-shot instance
+ * per hit, see fireSamplePlayerOverride) and so can never be a valid
+ * target here. */
+export type EffectLiveTarget =
+  | { kind: "row"; rowId: string }
+  | { kind: "master" | "sendBus" };
+
 /** Everything one running grid needs: the shared clock (see bruit-kit's
  * stepClock.ts doc for why rows never own their own), the shared send
  * bus, the effects-chain cache, and the row/column config that
@@ -310,6 +320,29 @@ export class GridModel {
 
   getSendBusEffects(): EffectSpec[] {
     return this.sendBusEffects;
+  }
+
+  /** The live-nudge bypass drift (see gridView.ts's drift engine) uses
+   * instead of setRowEffects/setMasterEffects/setSendBusEffects' full
+   * rebuild -- resolves whichever of the three persistent chains `target`
+   * names and forwards straight to its own setParamsAt. A stale rowId (row
+   * removed since) is a silent no-op, matching setParamsAt's own
+   * tolerance of a stale index -- the engine always re-reads current rows
+   * every tick, so it just stops applying next tick rather than needing
+   * this to report failure. */
+  applyLiveEffectParam(
+    target: EffectLiveTarget,
+    index: number,
+    key: string,
+    value: number,
+  ): void {
+    const chain =
+      target.kind === "row"
+        ? this.rows.find((r) => r.id === target.rowId)?.chain
+        : target.kind === "master"
+          ? this.masterChain
+          : this.sendChain;
+    chain?.setParamsAt(index, { [key]: value });
   }
 
   getRows(): Row[] {
