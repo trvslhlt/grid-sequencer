@@ -78,6 +78,8 @@ export const SAMPLE_CATEGORIES = [
   "bass",
   "lead",
   "pad",
+  "keys",
+  "strings",
   "fx",
   "other",
 ] as const;

@@ -15,13 +15,16 @@ assets/base-samples/
   percussion/kick.wav
   bass/sub-growl.wav
   lead/pluck.wav
-  pad/warm-strings.wav
+  pad/warm-pad.wav
+  keys/piano-note.wav
+  strings/string-ensemble.wav
   fx/riser.wav
   other/vocal-chop.wav
 ```
 
 - **Folder name** becomes the sample's category (matches the app's own
-  `SAMPLE_CATEGORIES`: percussion, bass, lead, pad, fx, other).
+  `SAMPLE_CATEGORIES`: percussion, bass, lead, pad, keys, strings, fx,
+  other).
 - **Filename** (minus extension) becomes the sample's display name, so
   name it the way you want it to show up in the Sample Library panel.
 - **WAV is the safest format** — this app's own uploads/recordings are

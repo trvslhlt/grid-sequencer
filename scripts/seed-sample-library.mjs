@@ -391,6 +391,221 @@ const sounds = [
     },
   },
   {
+    name: "Piano Note",
+    category: "keys",
+    make: () => {
+      const fundamental = oscillator(
+        1.4,
+        SAMPLE_RATE,
+        constantFreq(261.63),
+        sineShape,
+      );
+      const overtone = oscillator(
+        1.4,
+        SAMPLE_RATE,
+        constantFreq(523.25),
+        sineShape,
+      );
+      const tone = mix(
+        envelope(fundamental, SAMPLE_RATE, () => 0.7),
+        envelope(overtone, SAMPLE_RATE, () => 0.2),
+      );
+      return envelope(
+        tone,
+        SAMPLE_RATE,
+        (t) => Math.min(1, t / 0.005) * Math.exp(-t / 0.55),
+      );
+    },
+  },
+  {
+    name: "Electric Piano",
+    category: "keys",
+    make: () => {
+      const carrier = oscillator(
+        1.6,
+        SAMPLE_RATE,
+        constantFreq(329.63),
+        sineShape,
+      );
+      const bell = oscillator(
+        1.6,
+        SAMPLE_RATE,
+        constantFreq(987.77),
+        sineShape,
+      );
+      const tone = mix(
+        envelope(carrier, SAMPLE_RATE, expDecay(0.9)),
+        envelope(bell, SAMPLE_RATE, expDecay(0.15)),
+      );
+      return envelope(tone, SAMPLE_RATE, (t) => Math.min(1, t / 0.004));
+    },
+  },
+  {
+    name: "Organ",
+    category: "keys",
+    make: () => {
+      const root = oscillator(1.0, SAMPLE_RATE, constantFreq(220), sineShape);
+      const octave = oscillator(1.0, SAMPLE_RATE, constantFreq(440), sineShape);
+      const twelfth = oscillator(
+        1.0,
+        SAMPLE_RATE,
+        constantFreq(660),
+        sineShape,
+      );
+      const tone = mix(
+        envelope(root, SAMPLE_RATE, () => 0.5),
+        envelope(octave, SAMPLE_RATE, () => 0.3),
+        envelope(twelfth, SAMPLE_RATE, () => 0.15),
+      );
+      return envelope(
+        tone,
+        SAMPLE_RATE,
+        (t) => Math.min(1, t / 0.02) * Math.exp(-Math.max(0, t - 0.7) / 0.15),
+      );
+    },
+  },
+  {
+    name: "Music Box",
+    category: "keys",
+    make: () => {
+      const tone = oscillator(
+        0.9,
+        SAMPLE_RATE,
+        constantFreq(1046.5),
+        sineShape,
+      );
+      const overtone = oscillator(
+        0.9,
+        SAMPLE_RATE,
+        constantFreq(2637),
+        sineShape,
+      );
+      const mixed = mix(
+        envelope(tone, SAMPLE_RATE, expDecay(0.35)),
+        envelope(overtone, SAMPLE_RATE, expDecay(0.08)),
+      );
+      return envelope(mixed, SAMPLE_RATE, (t) => Math.min(1, t / 0.003));
+    },
+  },
+  {
+    name: "Rhodes Bell",
+    category: "keys",
+    make: () => {
+      const carrier = oscillator(
+        1.3,
+        SAMPLE_RATE,
+        constantFreq(392),
+        sineShape,
+      );
+      const bell = oscillator(1.3, SAMPLE_RATE, constantFreq(1108), sineShape);
+      const tone = mix(
+        envelope(carrier, SAMPLE_RATE, expDecay(0.7)),
+        envelope(bell, SAMPLE_RATE, expDecay(0.25)),
+      );
+      return envelope(tone, SAMPLE_RATE, (t) => Math.min(1, t / 0.004));
+    },
+  },
+  {
+    name: "String Ensemble",
+    category: "strings",
+    make: () => {
+      const root = oscillator(1.8, SAMPLE_RATE, constantFreq(220), sawShape);
+      const fifth = oscillator(1.8, SAMPLE_RATE, constantFreq(330), sawShape);
+      const octave = oscillator(1.8, SAMPLE_RATE, constantFreq(440), sawShape);
+      const tone = onePoleLowpass(
+        mix(
+          envelope(root, SAMPLE_RATE, () => 0.5),
+          envelope(fifth, SAMPLE_RATE, () => 0.3),
+          envelope(octave, SAMPLE_RATE, () => 0.25),
+        ),
+        2200,
+        SAMPLE_RATE,
+      );
+      return envelope(
+        tone,
+        SAMPLE_RATE,
+        (t) => Math.min(1, t / 0.3) * Math.exp(-Math.max(0, t - 0.4) / 1.1),
+      );
+    },
+  },
+  {
+    name: "Cello Swell",
+    category: "strings",
+    make: () => {
+      const root = oscillator(2.0, SAMPLE_RATE, constantFreq(110), sawShape);
+      const fifth = oscillator(2.0, SAMPLE_RATE, constantFreq(165), sawShape);
+      const tone = onePoleLowpass(
+        mix(
+          envelope(root, SAMPLE_RATE, () => 0.6),
+          envelope(fifth, SAMPLE_RATE, () => 0.25),
+        ),
+        1400,
+        SAMPLE_RATE,
+      );
+      return envelope(
+        tone,
+        SAMPLE_RATE,
+        (t) => Math.min(1, t / 0.5) * Math.exp(-Math.max(0, t - 0.6) / 1.2),
+      );
+    },
+  },
+  {
+    name: "Violin Tremolo",
+    category: "strings",
+    make: () => {
+      const tone = onePoleLowpass(
+        oscillator(1.5, SAMPLE_RATE, constantFreq(659.25), sawShape),
+        3500,
+        SAMPLE_RATE,
+      );
+      // The sustain portion is amplitude-modulated at 7Hz on top of the
+      // usual attack/release shape -- a plain sustained tone reads as
+      // "held violin," the wobble is what makes it read as "tremolo
+      // bowing" specifically.
+      return envelope(
+        tone,
+        SAMPLE_RATE,
+        (t) =>
+          Math.min(1, t / 0.15) *
+          Math.exp(-Math.max(0, t - 1.0) / 0.3) *
+          (0.75 + 0.25 * Math.sin(2 * Math.PI * 7 * t)),
+      );
+    },
+  },
+  {
+    name: "Pizzicato Strings",
+    category: "strings",
+    make: () => {
+      const tone = onePoleLowpass(
+        oscillator(0.35, SAMPLE_RATE, constantFreq(392), sawShape),
+        2800,
+        SAMPLE_RATE,
+      );
+      return envelope(tone, SAMPLE_RATE, expDecay(0.09));
+    },
+  },
+  {
+    name: "Dark Strings",
+    category: "strings",
+    make: () => {
+      const root = oscillator(2.2, SAMPLE_RATE, constantFreq(98), sawShape);
+      const fifth = oscillator(2.2, SAMPLE_RATE, constantFreq(147), sawShape);
+      const tone = onePoleLowpass(
+        mix(
+          envelope(root, SAMPLE_RATE, () => 0.6),
+          envelope(fifth, SAMPLE_RATE, () => 0.25),
+        ),
+        900,
+        SAMPLE_RATE,
+      );
+      return envelope(
+        tone,
+        SAMPLE_RATE,
+        (t) => Math.min(1, t / 0.6) * Math.exp(-Math.max(0, t - 0.8) / 1.4),
+      );
+    },
+  },
+  {
     name: "Riser",
     category: "fx",
     make: () => {
