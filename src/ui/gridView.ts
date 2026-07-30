@@ -714,7 +714,18 @@ function openParamRangeModal(
   // (row/master/send-bus, not a per-cell override -- see effectsFields'
   // own driftTarget doc). Drift wanders within whatever range this same
   // modal edits, so it lives in this popup rather than a separate control.
-  drift?: { enabled: () => boolean; onToggle: (enabled: boolean) => void },
+  // Speed is per-param (see EffectSpec.drift's own doc on why), shown
+  // only while Drift itself is checked -- meaningless otherwise, and
+  // this is a self-contained popup rather than the main panel, so a
+  // field that appears/disappears with a sibling checkbox here doesn't
+  // run into the "never conditionally hide a field" rule that applies to
+  // the always-visible panel body.
+  drift?: {
+    enabled: () => boolean;
+    onToggle: (enabled: boolean) => void;
+    speed: () => number;
+    onSpeedChange: (speed: number) => void;
+  },
 ): void {
   const overlay = document.createElement("div");
   overlay.className = "modal-overlay";
@@ -786,6 +797,20 @@ function openParamRangeModal(
                 renderBody();
               },
             },
+            ...(drift.enabled()
+              ? [
+                  {
+                    key: "drift-speed",
+                    label: "Speed",
+                    kind: "range" as const,
+                    value: drift.speed(),
+                    min: 0,
+                    max: 1,
+                    step: 0.01,
+                    onChange: (v: number) => drift.onSpeedChange(v),
+                  },
+                ]
+              : []),
           ]
         : []),
     ]);
@@ -1048,22 +1073,42 @@ export function effectsFields(
         };
 
         const isDrifting = (): boolean =>
-          getEffects()[index]?.driftParams?.includes(param.key) ?? false;
+          getEffects()[index]?.drift?.[param.key] !== undefined;
+
+        const driftSpeed = (): number =>
+          getEffects()[index]?.drift?.[param.key]?.speed ?? 0.5;
 
         const toggleDrift = (enabled: boolean): void => {
           const current = getEffects();
           onUpdate(
             current.map((e, i) => {
               if (i !== index) return e;
-              const existing = e.driftParams ?? [];
-              const nextDrift = enabled
-                ? existing.includes(param.key)
-                  ? existing
-                  : [...existing, param.key]
-                : existing.filter((k) => k !== param.key);
+              if (!enabled) {
+                const { [param.key]: _dropped, ...rest } = e.drift ?? {};
+                return {
+                  ...e,
+                  drift: Object.keys(rest).length > 0 ? rest : undefined,
+                };
+              }
               return {
                 ...e,
-                driftParams: nextDrift.length > 0 ? nextDrift : undefined,
+                drift: {
+                  ...e.drift,
+                  [param.key]: { speed: e.drift?.[param.key]?.speed ?? 0.5 },
+                },
+              };
+            }),
+          );
+        };
+
+        const setDriftSpeed = (speed: number): void => {
+          const current = getEffects();
+          onUpdate(
+            current.map((e, i) => {
+              if (i !== index || !e.drift?.[param.key]) return e;
+              return {
+                ...e,
+                drift: { ...e.drift, [param.key]: { speed } },
               };
             }),
           );
@@ -1090,7 +1135,12 @@ export function effectsFields(
               resetRange,
               driftTarget === undefined
                 ? undefined
-                : { enabled: isDrifting, onToggle: toggleDrift },
+                : {
+                    enabled: isDrifting,
+                    onToggle: toggleDrift,
+                    speed: driftSpeed,
+                    onSpeedChange: setDriftSpeed,
+                  },
             ),
           onChange: (v) => onChange(v / scale),
         });
@@ -1161,12 +1211,20 @@ interface DriftState {
 }
 
 const DRIFT_TICK_MS = 150;
-// Approach-toward-target factor applied each tick -- small enough that a
-// retarget (see randomRetargetDelay) reads as a slow glide, not a jump.
-const DRIFT_LERP = 0.03;
 
-function randomRetargetDelay(): number {
-  return 3000 + Math.random() * 5000;
+// speed is 0..1 (EffectSpec.drift's own unit, default 0.5) -- higher
+// retargets more often (shorter delay) and glides faster toward each new
+// target (bigger lerp factor); both scale off the same knob so "Speed"
+// reads as one coherent pace rather than two independently-tunable
+// numbers a user would have to reconcile by ear.
+function retargetDelayMsFor(speed: number): number {
+  const baseMs = 8000 - speed * 7000; // 8000ms (speed 0) .. 1000ms (speed 1)
+  const spanMs = 5000 - speed * 4000; // 5000ms (speed 0) .. 1000ms (speed 1)
+  return baseMs + Math.random() * spanMs;
+}
+
+function lerpFactorFor(speed: number): number {
+  return 0.01 + speed * 0.09; // 0.01 (speed 0) .. 0.10 (speed 1)
 }
 
 function driftTargetKey(target: EffectLiveTarget): string {
@@ -1210,15 +1268,17 @@ function startDriftEngine(model: GridModel): void {
 
     for (const { target, effects } of targets) {
       effects.forEach((spec, index) => {
-        if (!spec.driftParams?.length) return;
+        const drift = spec.drift;
+        if (!drift) return;
         const table = EFFECT_TABLE.find((e) => e.type === spec.type);
         if (!table) return;
-        for (const key of spec.driftParams) {
+        for (const key of Object.keys(drift)) {
           const param = table.params.find(
             (p): p is EffectRangeParamSpec =>
               p.key === key && p.kind === "range",
           );
           if (!param) continue;
+          const speed = drift[key]?.speed ?? 0.5;
 
           const stateKey = `${driftTargetKey(target)}:${index}:${spec.type}:${key}`;
           seen.add(stateKey);
@@ -1237,7 +1297,7 @@ function startDriftEngine(model: GridModel): void {
               scale,
               current: baseDisplay,
               wanderTarget: baseDisplay,
-              nextRetargetAt: Date.now() + randomRetargetDelay(),
+              nextRetargetAt: Date.now() + retargetDelayMsFor(speed),
               min: active.min,
               max: active.max,
             };
@@ -1254,9 +1314,10 @@ function startDriftEngine(model: GridModel): void {
           if (now >= state.nextRetargetAt) {
             state.wanderTarget =
               state.min + Math.random() * (state.max - state.min);
-            state.nextRetargetAt = now + randomRetargetDelay();
+            state.nextRetargetAt = now + retargetDelayMsFor(speed);
           }
-          const delta = (state.wanderTarget - state.current) * DRIFT_LERP;
+          const delta =
+            (state.wanderTarget - state.current) * lerpFactorFor(speed);
           // Once settled near its current wander target, skip pushing an
           // effectively-unchanged value every 150ms until the next
           // retarget actually moves it -- (state.max - state.min) scales

@@ -35,14 +35,22 @@ export interface EffectSpec {
   /** Which of this effect instance's own numeric params should slowly
    * random-walk on their own while playing (see gridView.ts's drift
    * engine), wandering within whatever range is active for that param
-   * (paramRanges' custom range if set, else the table default). This is
-   * the intent to persist -- not the live wandering value itself, which
-   * is pushed straight to the running effect instance via
+   * (paramRanges' custom range if set, else the table default), plus
+   * each one's own `speed` (0..1, default 0.5 -- higher retargets more
+   * often and glides faster toward each new target, lower is slower and
+   * more glacial). Per-param rather than one global speed: it's cheap to
+   * offer here since it already lives in the same opt-in popup as the
+   * Drift checkbox itself (see gridView.ts's openParamRangeModal), not a
+   * row of its own cluttering the main panel, and different params
+   * plausibly want very different paces (a reverb decay wandering over
+   * minutes vs. a filter cutoff wobbling every second). This is the
+   * intent to persist -- not the live wandering value itself, which is
+   * pushed straight to the running effect instance via
    * BuiltEffectsChain.setParamsAt and never written back here. Meaningful
    * to save as part of a patch (unlike solo, see RowRuntime.solo's own
    * doc): "this reverb's decay wanders" is a sound-design choice, not
    * session/audition state. */
-  driftParams?: string[];
+  drift?: Record<string, { speed: number }>;
 }
 
 export interface EnvelopePoint {
