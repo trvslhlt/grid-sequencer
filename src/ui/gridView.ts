@@ -1303,6 +1303,93 @@ function startDriftEngine(model: GridModel): void {
   }, DRIFT_TICK_MS);
 }
 
+/** Sidechain-style ducking (see RowConfig.duck's own doc): the target-row
+ * select is the only enable/disable gate -- "(None)" clears the whole
+ * relationship, any other row sets one up (creating it with sensible
+ * defaults if this is the first time). No section-level toggle the way
+ * Envelope/Effects use one: a second on/off control alongside "(None)"
+ * would just be two ways to say the same thing. Amount/attack/release
+ * stay visible and interactive even at "(None)" (this file's usual "never
+ * conditionally hide a field based on another field's value" rule --
+ * see the Filter effect's own gain param for the same reasoning) --
+ * adjusting them pre-selects values a target choice will pick up, rather
+ * than being disabled dead weight until one exists. None of these four
+ * fields call render(): none of them change *which* fields exist, just
+ * their values (same reasoning as e.g. Playback mode's own select just
+ * above in rowPanel), so fields.ts's own local live-readout is enough. */
+function duckFields(row: Row, model: GridModel): Field[] {
+  const defaults = {
+    targetRowName: "",
+    amount: 0.6,
+    attackMs: 5,
+    releaseMs: 200,
+  };
+  // For the fields' own initial displayed values only -- render() isn't
+  // called after any of these fields commit (see this function's own
+  // top doc), so `current` here would otherwise go stale the moment a
+  // sibling field's own update() ran, e.g. picking a target then
+  // dragging Amount with no render in between would still close over
+  // "no target" and silently clear the very selection just made. update()
+  // re-reads model.getRow fresh instead, same reasoning as effectsFields'
+  // own getEffects()-called-inside-every-handler.
+  const current = row.config.duck ?? defaults;
+  const update = (patch: Partial<typeof defaults>): void => {
+    const latest = model.getRow(row.id)?.config.duck ?? defaults;
+    const next = { ...latest, ...patch };
+    model.setRowDuck(row, next.targetRowName ? next : undefined);
+  };
+
+  return [
+    {
+      key: "duck-target",
+      label: "Duck target row",
+      kind: "select",
+      value: current.targetRowName,
+      options: [
+        { value: "", label: "(None)" },
+        ...model
+          .getRows()
+          .filter((r) => r.id !== row.id)
+          .map((r) => ({ value: r.config.name, label: r.config.name })),
+      ],
+      onChange: (v) => update({ targetRowName: v }),
+    },
+    {
+      key: "duck-amount",
+      label: "Amount",
+      kind: "range",
+      value: current.amount,
+      min: 0,
+      max: 1,
+      step: 0.01,
+      indented: true,
+      onChange: (v) => update({ amount: v }),
+    },
+    {
+      key: "duck-attack",
+      label: "Attack (ms)",
+      kind: "range",
+      value: current.attackMs,
+      min: 0,
+      max: 50,
+      step: 1,
+      indented: true,
+      onChange: (v) => update({ attackMs: v }),
+    },
+    {
+      key: "duck-release",
+      label: "Release (ms)",
+      kind: "range",
+      value: current.releaseMs,
+      min: 10,
+      max: 1000,
+      step: 10,
+      indented: true,
+      onChange: (v) => update({ releaseMs: v }),
+    },
+  ];
+}
+
 /** Envelope is always a single consolidated override (like row/column
  * Defaults, unlike note/gain/gate/time-shift's per-field checkboxes) -- a
  * single breakpoint-curve editor (see fields.ts's "automation" kind),
@@ -1738,6 +1825,10 @@ export function createGridView(
             options.onSaveEffectChainPreset,
             { kind: "row", rowId: row.id },
           ),
+        },
+        {
+          title: "Duck",
+          fields: duckFields(row, model),
         },
       ],
     };

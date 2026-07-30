@@ -122,6 +122,24 @@ export interface RowConfig {
    * "Reverse" action instead -- unrelated to this flag, and doesn't touch
    * it. */
   reversed: boolean;
+  /** Sidechain-style ducking: whenever THIS row actually fires (same
+   * gate as everything else -- muted/soloed-out/cell-off rows duck
+   * nothing), briefly reduces `targetRowName`'s own gain to `1 - amount`
+   * over `attackMs`, then recovers to normal over `releaseMs` -- the
+   * classic "kick ducks the pad" sidechain pump. Targeted by name, not
+   * the runtime row id: row ids are freshly regenerated on every patch
+   * load (see patch.ts's PatchRow, which has no id field at all), so a
+   * name is the only reference that can round-trip through save/load.
+   * Renaming the target row after the fact doesn't error or get cleared
+   * -- the relationship just goes quietly inert until a same-named row
+   * exists again (see GridModel.fireTick's live name lookup). undefined,
+   * or an empty targetRowName, means no ducking. */
+  duck?: {
+    targetRowName: string;
+    amount: number;
+    attackMs: number;
+    releaseMs: number;
+  };
 }
 
 export interface ColumnConfig {

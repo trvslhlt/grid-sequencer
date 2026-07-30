@@ -61,6 +61,7 @@ export function serializePatch(
       sendLevel: row.config.sendLevel,
       sampleRange: row.config.sampleRange,
       reversed: row.config.reversed,
+      duck: row.config.duck,
       sourceParams: row.source.getParams(),
       sampleId: rowSampleIds.get(row.id) ?? null,
       cells: row.cells,
@@ -139,6 +140,11 @@ async function addPatchRow(
   model.setRowEnvelope(row, (patchRow.envelope as EnvelopeParams).points);
   model.setRowEffects(row, patchRow.effects as EffectSpec[]);
   model.setRowSendLevel(row, patchRow.sendLevel);
+  // Targets by name, resolved live at fire time (see RowConfig.duck's own
+  // doc) -- safe to set regardless of whether the target row has been
+  // added yet, since addPatchRow runs once per row in sequence here but
+  // nothing reads this until playback actually fires a note.
+  if (patchRow.duck) model.setRowDuck(row, patchRow.duck);
   row.source.setParams(patchRow.sourceParams);
 
   if (patchRow.sampleId && row.source.needsSample) {

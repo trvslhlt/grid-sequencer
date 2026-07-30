@@ -146,6 +146,15 @@ interface RowRuntime {
   readonly envelopeGain: GainNode;
   cells: CellConfig[];
   chain: BuiltEffectsChain;
+  /** Sits between chain.output and this row's two normal destinations
+   * (masterGain, send.input) -- see addRow's own doc. Persistent for the
+   * row's whole lifetime, unlike `chain` (which setRowEffects freely
+   * swaps): any *other* row's duck relationship targets this node
+   * directly by name lookup at fire time (see fireTick's scheduleDuck),
+   * so it has to stay the same node across effects edits or a duck
+   * relationship set up before an edit would silently stop reaching the
+   * row's actual output after one. */
+  readonly duckGain: GainNode;
   send: Send;
   sampleBuffer: AudioBuffer | undefined;
   active: boolean;
@@ -386,6 +395,7 @@ export class GridModel {
       sendLevel: 0,
       sampleRange: { start: 0, end: 1 },
       reversed: false,
+      duck: undefined,
     };
     if (sourceType === "samplePlayer") {
       source.setParams({
@@ -411,10 +421,21 @@ export class GridModel {
     // so can still safely use the cache. Rows are also few enough (unlike
     // cells across a big grid) that not de-duping them costs little.
     const chain = buildEffectsChain(this.audioContext, config.effects);
-    chain.output.connect(this.masterGain);
+    // Sits between the chain's own output and both of this row's normal
+    // destinations (dry to masterGain, wet-tap to send) -- one node any
+    // *other* row's duck relationship can reach via scheduleDuck to
+    // briefly pull this row's whole output down, dry and send alike,
+    // without touching the chain itself (which sendLevel/effects edits
+    // already rebuild independently). Unity gain (1) when nothing is
+    // ducking this row -- see fireTick's own scheduleDuck call for the
+    // envelope that actually moves it.
+    const duckGain = this.audioContext.createGain();
+    duckGain.gain.value = 1;
+    chain.output.connect(duckGain);
+    duckGain.connect(this.masterGain);
     envelopeGain.connect(chain.input);
     const send = createSend(this.audioContext, this.sendBusInput, 0);
-    chain.output.connect(send.input);
+    duckGain.connect(send.input);
 
     const runtime: RowRuntime = {
       id: crypto.randomUUID(),
@@ -423,6 +444,7 @@ export class GridModel {
       envelopeGain,
       cells: Array.from({ length: this.columnCount }, () => createCellConfig()),
       chain,
+      duckGain,
       send,
       sampleBuffer: undefined,
       active: !joinAtNextCycle,
@@ -439,6 +461,7 @@ export class GridModel {
     runtime.source.output.disconnect();
     runtime.envelopeGain.disconnect();
     runtime.send.input.disconnect();
+    runtime.duckGain.disconnect();
     // Never shared with anything else (see addRow's own doc), so a blanket
     // dispose is safe -- no other row's dry path or send routes through
     // this same chain instance.
@@ -554,6 +577,15 @@ export class GridModel {
     runtime.config = { ...runtime.config, sendLevel: level };
   }
 
+  /** Just records the config -- unlike sendLevel (a live gain value set
+   * immediately) there's no persistent audio-graph change to make here;
+   * the relationship only actually does anything at fire time, per hit
+   * (see fireTick's own scheduleDuck call). */
+  setRowDuck(row: Row, duck: RowConfig["duck"]): void {
+    const runtime = this.findRuntime(row);
+    if (runtime) runtime.config = { ...runtime.config, duck };
+  }
+
   setRowSampleRange(row: Row, range: { start: number; end: number }): void {
     const runtime = this.findRuntime(row);
     if (!runtime) return;
@@ -595,8 +627,11 @@ export class GridModel {
     if (!runtime) return;
     const oldChain = runtime.chain;
     const newChain = buildEffectsChain(this.audioContext, effects);
-    newChain.output.connect(this.masterGain);
-    newChain.output.connect(runtime.send.input);
+    // Into duckGain, not masterGain/send.input directly -- duckGain is the
+    // one node that stays constant across this rebuild (see its own doc),
+    // so any duck relationship already targeting this row keeps reaching
+    // its actual output without needing to know a chain rebuild happened.
+    newChain.output.connect(runtime.duckGain);
     runtime.envelopeGain.disconnect();
     runtime.envelopeGain.connect(newChain.input);
     oldChain.dispose();
@@ -657,6 +692,43 @@ export class GridModel {
     return Math.max(0, Math.abs(end - start)) * buffer.duration;
   }
 
+  /** Schedules one duck dip-and-recover on `target`'s own duckGain,
+   * anchored at `atTime` (the *source* row's own shiftedAtTime, so the
+   * dip lands exactly on the hit that triggered it, timeShift included).
+   * Reuses bruit-kit's scheduleAutomation rather than hand-rolling
+   * cancel/ramp calls -- its own doc explains why a synchronous
+   * `gain.value` read is the wrong anchor for a lookahead-scheduled
+   * future atTime (it reflects "now," not what any still-pending ramp
+   * will have reached by then) and cancelAndHoldAtTime is the correct
+   * fix; retriggering mid-dip (a fast roll on the source row) rides on
+   * that same click-safe anchoring for free. A 3-point curve in 0..1
+   * value space maps directly onto a gain multiplier, no valueRange
+   * remapping needed: unity at the start, down to `1 - amount` at the
+   * attack point, back to unity by the end. */
+  private scheduleDuck(
+    target: RowRuntime,
+    duck: NonNullable<RowConfig["duck"]>,
+    atTime: number,
+  ): void {
+    const amount = Math.min(Math.max(duck.amount, 0), 1);
+    const attackSeconds = Math.max(duck.attackMs, 0) / 1000;
+    const releaseSeconds = Math.max(duck.releaseMs, 0) / 1000;
+    const durationSeconds = attackSeconds + releaseSeconds;
+    if (durationSeconds <= 0) return;
+    scheduleAutomation(
+      target.duckGain.gain,
+      [
+        { position: 0, value: 1 },
+        { position: attackSeconds / durationSeconds, value: 1 - amount },
+        { position: 1, value: 1 },
+      ],
+      this.audioContext,
+      durationSeconds,
+      { min: 0, max: 1 },
+      atTime,
+    );
+  }
+
   private fireTick(
     stepIndex: number,
     atTime: number,
@@ -692,6 +764,15 @@ export class GridModel {
       if (!resolved.fires) continue;
 
       const shiftedAtTime = atTime + resolved.timeShiftSeconds;
+      if (runtime.config.duck?.targetRowName) {
+        const target = this.rows.find(
+          (r) =>
+            r !== runtime &&
+            r.config.name === runtime.config.duck?.targetRowName,
+        );
+        if (target)
+          this.scheduleDuck(target, runtime.config.duck, shiftedAtTime);
+      }
       const gateSeconds = stepSeconds * resolved.gate;
       // "direct" playback mode is deliberately pitch-cascade-immune
       // already (see RowConfig.playbackMode's doc) -- quantizing it too

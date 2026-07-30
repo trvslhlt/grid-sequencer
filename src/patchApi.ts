@@ -22,6 +22,12 @@ export interface PatchRow {
   sendLevel: number;
   sampleRange: { start: number; end: number };
   reversed: boolean;
+  duck?: {
+    targetRowName: string;
+    amount: number;
+    attackMs: number;
+    releaseMs: number;
+  };
   sourceParams: Record<string, unknown>;
   sampleId: string | null;
   cells: unknown[];
