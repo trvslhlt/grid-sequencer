@@ -352,6 +352,27 @@ input:disabled {
   white-space: nowrap;
 }
 
+/* Row panel's own "remove this row" action -- far right of the title row
+ * (panel-title-row's own space-between already puts it there), a trash
+ * icon rather than the old "Remove row" text button that used to sit at
+ * the bottom of the field list. */
+.panel-title-remove-button {
+  flex: none;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 0.1rem 0.35rem;
+  font-size: 0.9rem;
+  line-height: 1;
+  cursor: pointer;
+  color: #8a8f9a;
+}
+
+.panel-title-remove-button:hover {
+  color: #ff6b6b;
+  border-color: #ff6b6b;
+}
+
 .panel-header-button {
   flex-shrink: 0;
   font-size: 0.75rem;

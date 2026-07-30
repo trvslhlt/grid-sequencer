@@ -1420,6 +1420,12 @@ interface PanelContent {
   title: string;
   fields: Field[];
   sections: PanelSection[];
+  /** Only rowPanel sets this -- master/column/cell selections have no
+   * equivalent single "delete the thing I'm looking at" action (a column
+   * or cell isn't a discrete object to remove, and Master isn't
+   * removable at all). Rendered as a trash-icon button at the far right
+   * of the panel's own title row (see render()). */
+  onRemove?: () => void;
 }
 
 type Selection =
@@ -1740,19 +1746,19 @@ export function createGridView(
       }
     }
 
-    fields.push({
-      key: "remove",
-      label: "Remove row",
-      kind: "button",
-      onClick: () => {
-        model.removeRow(row);
-        select(null);
-      },
-    });
-
     return {
       title: `Row: ${row.config.name}`,
       fields,
+      // Rendered as a trash icon at the far right of the panel's own
+      // title row (see render()'s heading), not a field in the body --
+      // "remove this row" reads as a title-bar action (same place a
+      // window's own close button lives), not one more setting in a
+      // list of them, and it's now reachable without scrolling down
+      // through every section below to find it.
+      onRemove: () => {
+        model.removeRow(row);
+        select(null);
+      },
       sections: [
         {
           title: "Defaults",
@@ -2217,7 +2223,7 @@ export function createGridView(
     // no longer uniquely identifies this one dynamic row/column/cell/
     // master panel.
     panel.className = "config-panel selection-panel";
-    const { title, fields, sections } = panelContent(rows);
+    const { title, fields, sections, onRemove } = panelContent(rows);
 
     const heading = document.createElement("div");
     heading.className = "panel-title-row";
@@ -2225,6 +2231,14 @@ export function createGridView(
     headingTitle.className = "panel-title";
     headingTitle.textContent = title;
     heading.appendChild(headingTitle);
+    if (onRemove) {
+      const removeButton = document.createElement("button");
+      removeButton.className = "panel-title-remove-button";
+      removeButton.textContent = "🗑";
+      removeButton.title = "Remove row";
+      removeButton.addEventListener("click", onRemove);
+      heading.appendChild(removeButton);
+    }
     panel.appendChild(heading);
 
     if (fields.length === 0 && sections.length === 0 && selection === null) {
