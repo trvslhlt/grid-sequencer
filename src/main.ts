@@ -14,7 +14,12 @@ import {
   SOURCE_TYPE_LABELS,
   type SourceType,
 } from "./grid/sourceFactory";
-import { type TempoState, applyPatch, serializePatch } from "./patch";
+import {
+  type TempoState,
+  applyPatch,
+  duplicateRow,
+  serializePatch,
+} from "./patch";
 import {
   type EffectChainPreset,
   type InstrumentPreset,
@@ -394,6 +399,14 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
     onSelectionChange: () => renderLibraryPanels(),
     onAddRow: async (sourceType, name) => {
       await addRow(sourceType, name);
+    },
+    // select()'s own render() + onSelectionChange already cover both
+    // showing the new row and refreshing the library panels against it
+    // -- no separate view.render()/renderLibraryPanels() call needed
+    // here on top of selectRow's.
+    onDuplicateRow: async (row) => {
+      const newRow = await duplicateRow(model, audioContext, row, rowSampleIds);
+      view.selectRow(newRow.id);
     },
   });
 

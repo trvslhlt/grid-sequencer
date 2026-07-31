@@ -113,6 +113,60 @@ export async function applyPatch(
   };
 }
 
+/** Builds a full independent copy of `sourceRow` -- same "walk live
+ * state into a plain snapshot, then rebuild live state from it" round
+ * trip serializePatch/addPatchRow already do for a whole patch's worth
+ * of rows, just for one row with no actual save/load in between. Every
+ * object/array-valued field is structuredClone'd rather than handed to
+ * addPatchRow by reference: addPatchRow's own per-field
+ * setRowX(row, patchRow.x) calls mostly replace whichever nested object
+ * wholesale on the *next* edit (so a shared reference would usually
+ * self-heal), but nothing here guarantees every future mutation path
+ * does that everywhere, and two rows silently sharing one mutable
+ * envelope/cells array is exactly the kind of bug that stays invisible
+ * until someone edits one row and is confused the other one changed
+ * too. Renamed ("X copy", "X copy 2", ...) rather than reusing the
+ * source's exact name: duck's own name-based targeting would still
+ * work fine with a duplicate name (first match wins), but every row-
+ * name dropdown in the app (duck's own target picker included) would
+ * read ambiguously otherwise. */
+export async function duplicateRow(
+  model: GridModel,
+  audioContext: AudioContext,
+  sourceRow: Row,
+  rowSampleIds: Map<string, string>,
+): Promise<Row> {
+  const existingNames = new Set(model.getRows().map((r) => r.config.name));
+  let name = `${sourceRow.config.name} copy`;
+  for (let n = 2; existingNames.has(name); n++) {
+    name = `${sourceRow.config.name} copy ${n}`;
+  }
+
+  const snapshot: PatchRow = {
+    name,
+    sourceType: sourceRow.config.sourceType,
+    enabled: sourceRow.config.enabled,
+    triggerMode: structuredClone(sourceRow.config.triggerMode),
+    playbackMode: sourceRow.config.playbackMode,
+    defaultsOverride: sourceRow.config.defaultsOverride,
+    defaultNote: sourceRow.config.defaultNote,
+    defaultGain: sourceRow.config.defaultGain,
+    defaultTimeShiftSeconds: sourceRow.config.defaultTimeShiftSeconds,
+    envelopeOverride: sourceRow.config.envelopeOverride,
+    envelope: structuredClone(sourceRow.config.envelope),
+    effects: structuredClone(sourceRow.config.effects),
+    sendLevel: sourceRow.config.sendLevel,
+    sampleRange: structuredClone(sourceRow.config.sampleRange),
+    reversed: sourceRow.config.reversed,
+    duck: structuredClone(sourceRow.config.duck),
+    sourceParams: structuredClone(sourceRow.source.getParams()),
+    sampleId: rowSampleIds.get(sourceRow.id) ?? null,
+    cells: structuredClone(sourceRow.cells),
+  };
+
+  return addPatchRow(model, audioContext, snapshot, rowSampleIds);
+}
+
 async function addPatchRow(
   model: GridModel,
   audioContext: AudioContext,

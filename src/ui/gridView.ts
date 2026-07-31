@@ -1876,6 +1876,14 @@ interface PanelContent {
    * removable at all). Rendered as a trash-icon button at the far right
    * of the panel's own title row (see render()). */
   onRemove?: () => void;
+  /** Only rowPanel sets this too, same reasoning as onRemove -- "make an
+   * independent copy of the thing I'm looking at" is meaningless for
+   * Master/a column/a cell (a cell's own copy-elsewhere concept, if it
+   * ever existed, wouldn't be this). Rendered as a second title-row icon
+   * button, left of Remove. Async since it goes through model.addRow
+   * (awaits a source's own init, see GridModel's doc) via main.ts's
+   * duplicateRow, same as the "+" row's onAddRow. */
+  onDuplicate?: () => Promise<void>;
 }
 
 type Selection =
@@ -1926,12 +1934,26 @@ export interface GridViewOptions {
    * sample, its own view.render()), this file just collects sourceType/
    * name and hands them off. */
   onAddRow?: (sourceType: SourceType, name: string) => Promise<void>;
+  /** Row panel's own Duplicate button (see PanelContent.onDuplicate) --
+   * same "this file collects the request, main.ts owns actually doing
+   * it" split as onAddRow. main.ts builds the copy (config, cells,
+   * source params, loaded sample -- see patch.ts's duplicateRow) and
+   * selects it afterward via selectRow so the new copy is what's open
+   * for editing next, not left on the original. */
+  onDuplicateRow?: (row: Row) => Promise<void>;
 }
 
 export interface GridViewHandle {
   render(): void;
   refreshPlayhead(): void;
   selectMaster(): void;
+  /** Selects a row by id -- used after onDuplicateRow builds a copy, so
+   * the newly duplicated row is what's open in the panel next, not left
+   * on whichever row was selected when Duplicate was clicked. A stale/
+   * unknown id is the same as any other selection of a since-removed
+   * row (see getSelectedRow's own null fallback in panelContent) --
+   * silently resolves to nothing selected, not an error. */
+  selectRow(rowId: string): void;
   /** The currently-selected row, if any -- main.ts's own library panels
    * (outside this file entirely) need this to know which row a library
    * click should target. */
@@ -2209,6 +2231,11 @@ export function createGridView(
         model.removeRow(row);
         select(null);
       },
+      onDuplicate: options.onDuplicateRow
+        ? async () => {
+            await options.onDuplicateRow?.(row);
+          }
+        : undefined,
       sections: [
         {
           title: "Defaults",
@@ -2673,7 +2700,8 @@ export function createGridView(
     // no longer uniquely identifies this one dynamic row/column/cell/
     // master panel.
     panel.className = "config-panel selection-panel";
-    const { title, fields, sections, onRemove } = panelContent(rows);
+    const { title, fields, sections, onRemove, onDuplicate } =
+      panelContent(rows);
 
     const heading = document.createElement("div");
     heading.className = "panel-title-row";
@@ -2681,13 +2709,32 @@ export function createGridView(
     headingTitle.className = "panel-title";
     headingTitle.textContent = title;
     heading.appendChild(headingTitle);
-    if (onRemove) {
-      const removeButton = document.createElement("button");
-      removeButton.className = "panel-title-remove-button";
-      removeButton.textContent = "🗑";
-      removeButton.title = "Remove row";
-      removeButton.addEventListener("click", onRemove);
-      heading.appendChild(removeButton);
+    if (onDuplicate || onRemove) {
+      // Grouped in their own container -- panel-title-row's own
+      // space-between expects exactly two items (title, "everything
+      // else"), not one per button spread individually across the row.
+      const actions = document.createElement("div");
+      actions.className = "panel-title-actions";
+      if (onDuplicate) {
+        const duplicateButton = document.createElement("button");
+        duplicateButton.className = "panel-title-icon-button";
+        duplicateButton.textContent = "⧉";
+        duplicateButton.title = "Duplicate row";
+        duplicateButton.addEventListener("click", () => {
+          onDuplicate();
+        });
+        actions.appendChild(duplicateButton);
+      }
+      if (onRemove) {
+        const removeButton = document.createElement("button");
+        removeButton.className =
+          "panel-title-icon-button panel-title-remove-button";
+        removeButton.textContent = "🗑";
+        removeButton.title = "Remove row";
+        removeButton.addEventListener("click", onRemove);
+        actions.appendChild(removeButton);
+      }
+      heading.appendChild(actions);
     }
     panel.appendChild(heading);
 
@@ -2763,6 +2810,7 @@ export function createGridView(
     render,
     refreshPlayhead,
     selectMaster: () => select({ kind: "master" }),
+    selectRow: (rowId) => select({ kind: "row", rowId }),
     getSelectedRow,
     getSelectedEffectsTarget,
   };

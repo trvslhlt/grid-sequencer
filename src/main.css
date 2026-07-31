@@ -352,11 +352,17 @@ input:disabled {
   white-space: nowrap;
 }
 
-/* Row panel's own "remove this row" action -- far right of the title row
- * (panel-title-row's own space-between already puts it there), a trash
- * icon rather than the old "Remove row" text button that used to sit at
- * the bottom of the field list. */
-.panel-title-remove-button {
+/* Row panel's own Duplicate/Remove actions, grouped together at the far
+ * right of the title row (panel-title-row's own space-between puts this
+ * whole group there) -- icons rather than the old "Remove row" text
+ * button that used to sit at the bottom of the field list. */
+.panel-title-actions {
+  display: flex;
+  gap: 0.3rem;
+  flex: none;
+}
+
+.panel-title-icon-button {
   flex: none;
   background: transparent;
   border: 1px solid transparent;
@@ -368,6 +374,12 @@ input:disabled {
   color: #8a8f9a;
 }
 
+.panel-title-icon-button:hover {
+  color: #e4e6eb;
+  border-color: #454b60;
+}
+
+/* Destructive -- red hover instead of the neutral one above. */
 .panel-title-remove-button:hover {
   color: #ff6b6b;
   border-color: #ff6b6b;
