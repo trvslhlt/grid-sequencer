@@ -1146,6 +1146,21 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
         view.render();
         renderLibraryPanels();
       },
+      // Clears rows and the master bus's own Effects chain -- tempo/
+      // columns/send-bus/scale are left exactly as they are, matching
+      // the button's own "clear all tracks" description rather than a
+      // full reset-everything New. currentPatchName is deliberately
+      // untouched too: the Save field already lets you type a different
+      // name before saving, no need to force that choice here.
+      onNew: () => {
+        for (const row of model.getRows()) {
+          model.removeRow(row);
+        }
+        model.setMasterEffects([]);
+        rowSampleIds.clear();
+        view.render();
+        renderLibraryPanels();
+      },
     });
   });
 

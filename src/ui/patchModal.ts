@@ -20,6 +20,14 @@ export interface PatchModalCallbacks {
    * by the time this is called -- throws on failure, same as every
    * other modal's save/load callback in this app. */
   onLoad: (id: string) => Promise<void>;
+  /** Confirmed already (see the New button's own window.confirm below)
+   * by the time this is called -- clears every row and the master bus's
+   * own Effects chain, leaving tempo/columns/send-bus/scale untouched
+   * (this only does what the button says: clear tracks -- and the
+   * master effects riding on top of them -- not reset the whole patch).
+   * Synchronous and can't fail the way Save/Load can (no network round
+   * trip), so unlike those two this has no return value to report back. */
+  onNew: () => void;
 }
 
 export function openPatchModal(
@@ -111,6 +119,22 @@ export function openPatchModal(
 
   const footer = document.createElement("div");
   footer.className = "modal-footer";
+
+  // Leftmost -- "start fresh" reads first, same left-to-right ordering as
+  // a File menu's own New/Open/Save. Closes the modal on success like
+  // Load does (not Save's "leave it open"): both replace the whole grid,
+  // so there's nothing left in this popup session to keep editing after.
+  const newButton = document.createElement("button");
+  newButton.textContent = "New";
+  newButton.addEventListener("click", () => {
+    const confirmMessage = dirty
+      ? `"${displayName}" has unsaved changes that will be lost. Clear all tracks and start a new patch?`
+      : "Clear all tracks and start a new patch?";
+    if (!window.confirm(confirmMessage)) return;
+    callbacks.onNew();
+    close();
+  });
+  footer.appendChild(newButton);
 
   const loadButton = document.createElement("button");
   loadButton.textContent = "Load";
