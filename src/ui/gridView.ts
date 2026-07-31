@@ -2233,7 +2233,16 @@ export function createGridView(
       },
       onDuplicate: options.onDuplicateRow
         ? async () => {
-            await options.onDuplicateRow?.(row);
+            // Not the `row` param directly -- it's a snapshot from
+            // whenever this panel was last rendered, and continuous
+            // controls (the envelope editor's drag, every plain slider)
+            // deliberately don't re-render on every edit (see fields.ts's
+            // own top comment), so `row.config` here can be stale by the
+            // time Duplicate is actually clicked. model.getRow re-reads
+            // the live current config, same reasoning as effectsFields'
+            // own getEffects()-called-fresh-in-every-handler.
+            const current = model.getRow(row.id);
+            if (current) await options.onDuplicateRow?.(current);
           }
         : undefined,
       sections: [
