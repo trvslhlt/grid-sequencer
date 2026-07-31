@@ -1,6 +1,10 @@
 import "bruit-kit/ui/automationEditor.css";
 import "bruit-kit/ui/waveformRangeView.css";
-import { Recorder, preloadPitchShiftWorklet } from "bruit-kit/audio";
+import {
+  Recorder,
+  preloadPitchShiftWorklet,
+  preloadSampleRateReducerWorklet,
+} from "bruit-kit/audio";
 import { getSharedLimiter, unlockAudioContext } from "./audioContext";
 import type { EffectSpec, Precedence } from "./grid/config";
 import { GridModel, type Row } from "./grid/gridModel";
@@ -204,6 +208,9 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
   // done lazily inside the effect's constructor instead.
   preloadPitchShiftWorklet(audioContext).catch((err) => {
     console.error("Failed to preload pitch-shift worklet:", err);
+  });
+  preloadSampleRateReducerWorklet(audioContext).catch((err) => {
+    console.error("Failed to preload sample-rate-reducer worklet:", err);
   });
 
   const limiter = getSharedLimiter(audioContext);

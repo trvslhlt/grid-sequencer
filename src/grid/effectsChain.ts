@@ -7,12 +7,22 @@ import {
   DistortionEffect,
   FilterEffect,
   FlangerEffect,
+  FoldbackDistortionEffect,
+  FuzzEffect,
   GainEffect,
+  HardClipEffect,
+  OverdriveEffect,
+  ParametricWaveshaperEffect,
   PhaserEffect,
   PitchShiftEffect,
+  RectifierEffect,
   ReverbEffect,
   RingModulationEffect,
+  SampleRateReducerEffect,
+  SoftClipEffect,
+  TapeSaturationEffect,
   TremoloEffect,
+  WaveFolderEffect,
   chainEffects,
 } from "bruit-kit/audio";
 import type { ChainableNode } from "bruit-kit/audio";
@@ -106,6 +116,62 @@ function instantiateEffect(
       // renderEffectsOffline preloads on its own fresh OfflineAudioContext
       // whenever pitchShift appears among the effects being baked.
       const fx = new PitchShiftEffect(audioContext);
+      fx.setParams({ wet: 1, ...spec.params });
+      return fx;
+    }
+    case "softClip": {
+      const fx = new SoftClipEffect(audioContext);
+      fx.setParams({ wet: 1, ...spec.params });
+      return fx;
+    }
+    case "hardClip": {
+      const fx = new HardClipEffect(audioContext);
+      fx.setParams({ wet: 1, ...spec.params });
+      return fx;
+    }
+    case "overdrive": {
+      const fx = new OverdriveEffect(audioContext);
+      fx.setParams({ wet: 1, ...spec.params });
+      return fx;
+    }
+    case "waveFolder": {
+      const fx = new WaveFolderEffect(audioContext);
+      fx.setParams({ wet: 1, ...spec.params });
+      return fx;
+    }
+    case "fuzz": {
+      const fx = new FuzzEffect(audioContext);
+      fx.setParams({ wet: 1, ...spec.params });
+      return fx;
+    }
+    case "foldbackDistortion": {
+      const fx = new FoldbackDistortionEffect(audioContext);
+      fx.setParams({ wet: 1, ...spec.params });
+      return fx;
+    }
+    case "rectifier": {
+      const fx = new RectifierEffect(audioContext);
+      fx.setParams({ wet: 1, ...spec.params });
+      return fx;
+    }
+    case "tapeSaturation": {
+      const fx = new TapeSaturationEffect(audioContext);
+      fx.setParams({ wet: 1, ...spec.params });
+      return fx;
+    }
+    case "sampleRateReducer": {
+      // Same worklet-preload requirement as pitchShift above -- see
+      // preloadSampleRateReducerWorklet's own doc comment. main.ts
+      // preloads it alongside pitchShift's own worklet at startup;
+      // sampleEditorModal.ts's renderEffectsOffline preloads it on each
+      // fresh OfflineAudioContext whenever sampleRateReducer appears
+      // among the effects being baked.
+      const fx = new SampleRateReducerEffect(audioContext);
+      fx.setParams({ wet: 1, ...spec.params });
+      return fx;
+    }
+    case "parametricWaveshaper": {
+      const fx = new ParametricWaveshaperEffect(audioContext);
       fx.setParams({ wet: 1, ...spec.params });
       return fx;
     }

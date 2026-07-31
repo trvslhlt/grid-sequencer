@@ -15,7 +15,17 @@ export type EffectType =
   | "autoWah"
   | "bitcrusher"
   | "reverb"
-  | "pitchShift";
+  | "pitchShift"
+  | "softClip"
+  | "hardClip"
+  | "overdrive"
+  | "waveFolder"
+  | "fuzz"
+  | "foldbackDistortion"
+  | "rectifier"
+  | "tapeSaturation"
+  | "sampleRateReducer"
+  | "parametricWaveshaper";
 
 export interface EffectSpec {
   type: EffectType;

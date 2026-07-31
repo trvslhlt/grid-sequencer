@@ -10,7 +10,10 @@
  * samples isn't cluttered with a full operations panel repeated on every
  * row; editing now happens in one place instead. */
 
-import { preloadPitchShiftWorklet } from "bruit-kit/audio";
+import {
+  preloadPitchShiftWorklet,
+  preloadSampleRateReducerWorklet,
+} from "bruit-kit/audio";
 import { type WaveformRange, createWaveformRangeView } from "bruit-kit/ui";
 import type { EffectSpec } from "../grid/config";
 import {
@@ -122,10 +125,14 @@ async function renderEffectsOffline(
   // Worklet registration is scoped per-context, not global -- this fresh
   // OfflineAudioContext doesn't inherit the real-time AudioContext's own
   // preload (see main.ts). Must be awaited *before* buildEffectsChain's
-  // synchronous `new PitchShiftEffect(...)` below, or that constructor
-  // throws (see preloadPitchShiftWorklet's own doc comment).
+  // synchronous `new PitchShiftEffect(...)`/`new SampleRateReducerEffect(...)`
+  // below, or that constructor throws (see preloadPitchShiftWorklet's own
+  // doc comment).
   if (effects.some((spec) => spec.type === "pitchShift")) {
     await preloadPitchShiftWorklet(offlineContext);
+  }
+  if (effects.some((spec) => spec.type === "sampleRateReducer")) {
+    await preloadSampleRateReducerWorklet(offlineContext);
   }
   const source = offlineContext.createBufferSource();
   source.buffer = buffer;
