@@ -2102,6 +2102,19 @@ export function createGridView(
           render();
         },
       });
+      // Every hit starts from wherever a virtual scan position has
+      // advanced to since this row's last one (real elapsed time,
+      // wrapping at the trimmed range's own end) instead of always the
+      // range start -- see RowConfig.continuePlayback's own doc. No
+      // render() needed: toggling this doesn't change which fields
+      // exist, just future firing behavior.
+      fields.push({
+        key: "continuePlayback",
+        label: "Continue from last position",
+        kind: "checkbox",
+        value: row.config.continuePlayback,
+        onChange: (v) => model.setRowContinuePlayback(row, v),
+      });
     }
 
     fields.push({

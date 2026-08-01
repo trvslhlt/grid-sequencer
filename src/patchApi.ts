@@ -28,6 +28,11 @@ export interface PatchRow {
     attackMs: number;
     releaseMs: number;
   };
+  /** Optional, not required -- patches saved before this field existed
+   * have no such key at all; addPatchRow falls back to `false` (the
+   * same default a freshly-added row already gets), not a migration
+   * system. */
+  continuePlayback?: boolean;
   sourceParams: Record<string, unknown>;
   sampleId: string | null;
   cells: unknown[];

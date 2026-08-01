@@ -55,13 +55,30 @@ export interface RowSource {
   /** Only GranularSynth needs this -- loads its AudioWorkletProcessor
    * before any noteOn will produce sound. */
   init?(): Promise<void>;
+  /** Only samplePlayer needs this -- a noteOn variant taking an explicit
+   * start-position override (0..1 fraction of the buffer), for
+   * RowConfig.continuePlayback's "resume from wherever the last hit left
+   * off" mode (see GridModel.fireTick). Deliberately not part of the
+   * generic `target: NoteTarget` -- a MIDI-driven caller (file playback,
+   * an arpeggiator) has no "start fraction" concept at all, so this is a
+   * samplePlayer-specific escape hatch alongside loadSample/init, the
+   * same shape those already use for a capability only some source types
+   * have. */
+  playFromPosition?(
+    note: number,
+    velocity: number,
+    time: number,
+    startFraction: number,
+  ): void;
 }
 
 function toRowSource<T extends NoteTarget & { output: AudioNode }>(
   instance: T,
   applyParams: (params: Record<string, unknown>) => void,
   paramFields: ParamField[],
-  extra: Partial<Pick<RowSource, "needsSample" | "loadSample" | "init">> = {},
+  extra: Partial<
+    Pick<RowSource, "needsSample" | "loadSample" | "init" | "playFromPosition">
+  > = {},
 ): RowSource {
   const currentParams: Record<string, unknown> = Object.fromEntries(
     paramFields.map((field) => [field.key, field.default]),
@@ -80,6 +97,7 @@ function toRowSource<T extends NoteTarget & { output: AudioNode }>(
     needsSample: extra.needsSample ?? false,
     loadSample: extra.loadSample,
     init: extra.init,
+    playFromPosition: extra.playFromPosition,
   };
 }
 
@@ -260,6 +278,8 @@ export function createRowSource(
         {
           needsSample: true,
           loadSample: (buffer) => player.loadSample(buffer),
+          playFromPosition: (note, velocity, time, startFraction) =>
+            player.noteOn(note, velocity, time, startFraction),
         },
       );
     }

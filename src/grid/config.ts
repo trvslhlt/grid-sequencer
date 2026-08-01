@@ -158,6 +158,24 @@ export interface RowConfig {
     attackMs: number;
     releaseMs: number;
   };
+  /** samplePlayer rows only: instead of every hit starting from the
+   * trimmed range's own start (sampleRange.start), each hit picks up
+   * from wherever a virtual "scan" position has advanced to since this
+   * row's last hit -- advancing by real elapsed wall-clock time (not
+   * audio-buffer time actually consumed, which would depend on each
+   * hit's own pitch/gate; the simpler clock-time model was chosen
+   * first, see the sound-play backlog), wrapping back to the range
+   * start once it reaches the range end. Gives successive hits on the
+   * same row variety -- different slices of a longer sample -- instead
+   * of always replaying the identical opening snippet. Tracked as
+   * RowRuntime.scanPositionSeconds/scanLastFireTime, not here: this
+   * flag is the persisted intent, the live scan position itself is
+   * session state the same way a live-drifting effect param's current
+   * value is (see EffectSpec.drift's own doc). Doesn't apply to a
+   * cell's own effects override (fireSamplePlayerOverride) -- that's
+   * already a more specialized per-hit path this doesn't extend into
+   * for now. */
+  continuePlayback: boolean;
 }
 
 export interface ColumnConfig {

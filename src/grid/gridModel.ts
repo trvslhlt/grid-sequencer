@@ -166,6 +166,16 @@ interface RowRuntime {
    * counting toward the unsaved-changes dirty check. See fireTick's own
    * use of it for the actual silencing behavior. */
   solo: boolean;
+  /** RowConfig.continuePlayback's own live tracking -- see its doc.
+   * Seconds into the raw loaded buffer the virtual scan position
+   * currently sits at, and the shiftedAtTime of this row's last hit
+   * while continuePlayback was in effect (needed to compute how much
+   * real time elapsed before advancing the position on the next one).
+   * Both undefined until the first hit needs them; reset together
+   * (setRowContinuePlayback, loadRowSample) whenever resuming from
+   * wherever they last were wouldn't make sense any more. */
+  scanPositionSeconds: number | undefined;
+  scanLastFireTime: number | undefined;
 }
 
 export type Row = Readonly<
@@ -396,6 +406,7 @@ export class GridModel {
       sampleRange: { start: 0, end: 1 },
       reversed: false,
       duck: undefined,
+      continuePlayback: false,
     };
     if (sourceType === "samplePlayer") {
       source.setParams({
@@ -450,6 +461,8 @@ export class GridModel {
       active: !joinAtNextCycle,
       pendingCycleLength: joinAtNextCycle ? this.columnCount : null,
       solo: false,
+      scanPositionSeconds: undefined,
+      scanLastFireTime: undefined,
     };
     this.rows.push(runtime);
     return this.toRow(runtime);
@@ -481,6 +494,11 @@ export class GridModel {
       : buffer;
     await runtime.source.loadSample(activeBuffer);
     runtime.sampleBuffer = activeBuffer;
+    // A scan position tracked against the *old* buffer's timeline is
+    // meaningless once a different one is loaded -- see
+    // RowConfig.continuePlayback's own doc.
+    runtime.scanPositionSeconds = undefined;
+    runtime.scanLastFireTime = undefined;
   }
 
   /** Not part of the public `Row` shape (see its own doc for why) --
@@ -616,6 +634,19 @@ export class GridModel {
     if (runtime.source.loadSample) void runtime.source.loadSample(buffer);
   }
 
+  /** Resets the tracked scan position on every toggle, not just off->on
+   * -- flipping continuePlayback off and back on always starts fresh at
+   * the trimmed range's own start, rather than potentially resuming a
+   * position from however long ago it was last on (see
+   * RowConfig.continuePlayback's own doc). */
+  setRowContinuePlayback(row: Row, continuePlayback: boolean): void {
+    const runtime = this.findRuntime(row);
+    if (!runtime) return;
+    runtime.config = { ...runtime.config, continuePlayback };
+    runtime.scanPositionSeconds = undefined;
+    runtime.scanLastFireTime = undefined;
+  }
+
   /** Same build-before-dispose-shaped rebuild as setMasterEffects/
    * setSendBusEffects, just against a per-row dedicated chain instead of
    * the always-present master/send ones (see addRow's own doc for why rows
@@ -729,6 +760,41 @@ export class GridModel {
     );
   }
 
+  /** Advances (and records) RowConfig.continuePlayback's virtual scan
+   * position by however much real time passed since this row's last
+   * hit, wrapping within the trimmed sampleRange -- see that field's
+   * own doc. Returns the resulting position as a 0..1 fraction of the
+   * buffer's own duration, ready for RowSource.playFromPosition. */
+  private advanceScanPosition(
+    runtime: RowRuntime,
+    buffer: AudioBuffer,
+    atTime: number,
+  ): number {
+    const { start, end } = runtime.config.sampleRange;
+    const loSeconds = Math.min(start, end) * buffer.duration;
+    const hiSeconds = Math.max(start, end) * buffer.duration;
+    const spanSeconds = Math.max(0, hiSeconds - loSeconds);
+
+    let positionSeconds = loSeconds;
+    if (
+      spanSeconds > 0 &&
+      runtime.scanPositionSeconds !== undefined &&
+      runtime.scanLastFireTime !== undefined
+    ) {
+      const elapsed = Math.max(0, atTime - runtime.scanLastFireTime);
+      const raw = runtime.scanPositionSeconds - loSeconds + elapsed;
+      // Safe modulo -- JS's own % can return negative for a negative
+      // operand, which raw can be if sampleRange shrank/shifted since
+      // the last hit and moved loSeconds past the old position.
+      const withinSpan = ((raw % spanSeconds) + spanSeconds) % spanSeconds;
+      positionSeconds = loSeconds + withinSpan;
+    }
+    runtime.scanPositionSeconds = positionSeconds;
+    runtime.scanLastFireTime = atTime;
+
+    return buffer.duration > 0 ? positionSeconds / buffer.duration : 0;
+  }
+
   private fireTick(
     stepIndex: number,
     atTime: number,
@@ -833,7 +899,26 @@ export class GridModel {
           { min: 0, max: resolved.gain },
           shiftedAtTime,
         );
-        runtime.source.target.noteOn(note, FULL_VELOCITY, shiftedAtTime);
+        if (
+          runtime.config.sourceType === "samplePlayer" &&
+          runtime.config.continuePlayback &&
+          runtime.source.playFromPosition &&
+          runtime.sampleBuffer
+        ) {
+          const startFraction = this.advanceScanPosition(
+            runtime,
+            runtime.sampleBuffer,
+            shiftedAtTime,
+          );
+          runtime.source.playFromPosition(
+            note,
+            FULL_VELOCITY,
+            shiftedAtTime,
+            startFraction,
+          );
+        } else {
+          runtime.source.target.noteOn(note, FULL_VELOCITY, shiftedAtTime);
+        }
         runtime.source.target.noteOff(note, shiftedAtTime + gateSeconds);
       }
     }
