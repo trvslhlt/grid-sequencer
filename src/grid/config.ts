@@ -123,6 +123,15 @@ export interface RowConfig {
    * arbitrary and user-configured, not hardcoded to reverb any more, so
    * this is deliberately not called "reverbSend". */
   sendLevel: number;
+  /** -1 (full left) .. 1 (full right), 0 = center -- a native
+   * StereoPannerNode on GridModel's own RowRuntime.panNode, not an
+   * EFFECT_TABLE entry: this is a channel-strip mixer control every row
+   * always has (same category as sendLevel), not an insert effect
+   * someone adds/removes/reorders in a chain. Applies to both this
+   * row's dry output and its send-bus tap uniformly -- same "affects
+   * both paths alike" positioning as duckGain, sitting right after it
+   * in the signal path (see addRow). */
+  pan: number;
   /** samplePlayer rows only: 0..1 fractions of the loaded sample's own
    * duration, trimming which portion actually plays (see bruit-kit's
    * SamplePlayerParams.rangeStart/rangeEnd, which this maps straight onto).

@@ -59,6 +59,7 @@ export function serializePatch(
       envelope: row.config.envelope,
       effects: row.config.effects,
       sendLevel: row.config.sendLevel,
+      pan: row.config.pan,
       sampleRange: row.config.sampleRange,
       reversed: row.config.reversed,
       duck: row.config.duck,
@@ -157,6 +158,7 @@ export async function duplicateRow(
     envelope: structuredClone(sourceRow.config.envelope),
     effects: structuredClone(sourceRow.config.effects),
     sendLevel: sourceRow.config.sendLevel,
+    pan: sourceRow.config.pan,
     sampleRange: structuredClone(sourceRow.config.sampleRange),
     reversed: sourceRow.config.reversed,
     duck: structuredClone(sourceRow.config.duck),
@@ -196,6 +198,7 @@ async function addPatchRow(
   model.setRowEnvelope(row, (patchRow.envelope as EnvelopeParams).points);
   model.setRowEffects(row, patchRow.effects as EffectSpec[]);
   model.setRowSendLevel(row, patchRow.sendLevel);
+  model.setRowPan(row, patchRow.pan ?? 0);
   // Targets by name, resolved live at fire time (see RowConfig.duck's own
   // doc) -- safe to set regardless of whether the target row has been
   // added yet, since addPatchRow runs once per row in sequence here but

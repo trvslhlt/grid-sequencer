@@ -2165,6 +2165,16 @@ export function createGridView(
       step: 0.01,
       onChange: (v) => model.setRowSendLevel(row, v),
     });
+    fields.push({
+      key: "pan",
+      label: "Pan (L -1 .. 1 R)",
+      kind: "range",
+      value: row.config.pan,
+      min: -1,
+      max: 1,
+      step: 0.01,
+      onChange: (v) => model.setRowPan(row, v),
+    });
 
     const sourceParams = row.source.getParams();
     for (const field of row.source.paramFields) {

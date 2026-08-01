@@ -155,6 +155,12 @@ interface RowRuntime {
    * relationship set up before an edit would silently stop reaching the
    * row's actual output after one. */
   readonly duckGain: GainNode;
+  /** Sits right after duckGain, before this row's two normal
+   * destinations -- see RowConfig.pan's own doc. Persistent for the
+   * row's whole lifetime, same reasoning as duckGain: nothing ever
+   * needs to reconnect it (setRowEffects only ever swaps `chain`,
+   * upstream of both of these). */
+  readonly panNode: StereoPannerNode;
   send: Send;
   sampleBuffer: AudioBuffer | undefined;
   active: boolean;
@@ -403,6 +409,7 @@ export class GridModel {
       envelope: createEnvelope(),
       effects: [],
       sendLevel: 0,
+      pan: 0,
       sampleRange: { start: 0, end: 1 },
       reversed: false,
       duck: undefined,
@@ -442,11 +449,14 @@ export class GridModel {
     // envelope that actually moves it.
     const duckGain = this.audioContext.createGain();
     duckGain.gain.value = 1;
+    const panNode = this.audioContext.createStereoPanner();
+    panNode.pan.value = 0;
     chain.output.connect(duckGain);
-    duckGain.connect(this.masterGain);
+    duckGain.connect(panNode);
+    panNode.connect(this.masterGain);
     envelopeGain.connect(chain.input);
     const send = createSend(this.audioContext, this.sendBusInput, 0);
-    duckGain.connect(send.input);
+    panNode.connect(send.input);
 
     const runtime: RowRuntime = {
       id: crypto.randomUUID(),
@@ -456,6 +466,7 @@ export class GridModel {
       cells: Array.from({ length: this.columnCount }, () => createCellConfig()),
       chain,
       duckGain,
+      panNode,
       send,
       sampleBuffer: undefined,
       active: !joinAtNextCycle,
@@ -475,6 +486,7 @@ export class GridModel {
     runtime.envelopeGain.disconnect();
     runtime.send.input.disconnect();
     runtime.duckGain.disconnect();
+    runtime.panNode.disconnect();
     // Never shared with anything else (see addRow's own doc), so a blanket
     // dispose is safe -- no other row's dry path or send routes through
     // this same chain instance.
@@ -593,6 +605,14 @@ export class GridModel {
     if (!runtime) return;
     runtime.send.setLevel(level);
     runtime.config = { ...runtime.config, sendLevel: level };
+  }
+
+  setRowPan(row: Row, pan: number): void {
+    const runtime = this.findRuntime(row);
+    if (!runtime) return;
+    const clamped = Math.min(Math.max(pan, -1), 1);
+    runtime.panNode.pan.value = clamped;
+    runtime.config = { ...runtime.config, pan: clamped };
   }
 
   /** Just records the config -- unlike sendLevel (a live gain value set

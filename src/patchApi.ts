@@ -20,6 +20,10 @@ export interface PatchRow {
   envelope: unknown;
   effects: unknown[];
   sendLevel: number;
+  /** Optional, not required -- patches saved before this field existed
+   * have no such key at all; addPatchRow falls back to `0` (center,
+   * the same default a freshly-added row already gets). */
+  pan?: number;
   sampleRange: { start: number; end: number };
   reversed: boolean;
   duck?: {
