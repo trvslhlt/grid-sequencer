@@ -33,6 +33,18 @@ import { triggerModeGate, triggerModeSourceParams } from "./triggerModes";
  * avoid clicks at voice start/end, not a stylistic choice a preset would
  * make -- and it's a starting curve to reshape via the automation editor,
  * not a fixed set of stages. */
+/** Caps how many links a call-and-response chain can cascade through in
+ * one go (A triggers B, B's own callResponse triggers C, ...) -- see
+ * triggerCallResponse's own doc for why a hard cap is required rather
+ * than just trusting each hop's probability to eventually fizzle out:
+ * two rows pointed at each other (or any longer cycle) would otherwise
+ * recurse forever in one synchronous call, crashing the tab instead of
+ * just this one scheduling tick. 8 is generous for the kind of short
+ * musical phrase this feature is for -- deep enough that a real chain
+ * never feels artificially truncated, shallow enough to stay well under
+ * any JS engine's call-stack limit even at probability 1 on every hop. */
+const MAX_CALL_RESPONSE_HOPS = 8;
+
 export const BUILT_INS = {
   note: 60,
   gain: 0.8,
@@ -413,6 +425,7 @@ export class GridModel {
       sampleRange: { start: 0, end: 1 },
       reversed: false,
       duck: undefined,
+      callResponse: undefined,
       continuePlayback: false,
     };
     if (sourceType === "samplePlayer") {
@@ -622,6 +635,13 @@ export class GridModel {
   setRowDuck(row: Row, duck: RowConfig["duck"]): void {
     const runtime = this.findRuntime(row);
     if (runtime) runtime.config = { ...runtime.config, duck };
+  }
+
+  /** Same "just records the config" reasoning as setRowDuck -- see
+   * fireTick's own triggerCallResponse call. */
+  setRowCallResponse(row: Row, callResponse: RowConfig["callResponse"]): void {
+    const runtime = this.findRuntime(row);
+    if (runtime) runtime.config = { ...runtime.config, callResponse };
   }
 
   setRowSampleRange(row: Row, range: { start: number; end: number }): void {
@@ -859,6 +879,15 @@ export class GridModel {
         if (target)
           this.scheduleDuck(target, runtime.config.duck, shiftedAtTime);
       }
+      if (runtime.config.callResponse?.targetRowName) {
+        this.triggerCallResponse(
+          runtime,
+          runtime.config.callResponse,
+          shiftedAtTime,
+          stepSeconds,
+          soloActive,
+        );
+      }
       const gateSeconds = stepSeconds * resolved.gate;
       // "direct" playback mode is deliberately pitch-cascade-immune
       // already (see RowConfig.playbackMode's doc) -- quantizing it too
@@ -885,62 +914,135 @@ export class GridModel {
           resolved.envelope,
         );
       } else {
-        // The envelope drives envelopeGain -- a persistent, row-wide node
-        // downstream of the source (see RowRuntime's doc), not a per-voice
-        // param -- so scheduling it here, immediately before the noteOn it
-        // shapes, is safe for the same reason mutating a source's own
-        // params used to be: fireTick owns the entire scheduling loop
-        // itself (unlike bruit-kit's createStepTrack, which this app
-        // deliberately doesn't use for exactly this reason), so the
-        // schedule and the noteOn it applies to happen in the same
-        // synchronous call, both anchored at the same future shiftedAtTime
-        // -- a *later* tick scheduling a new curve can't retroactively
-        // affect a voice already firing. Every noteOn goes out at full
-        // velocity since gain is entirely carried by this curve's own
-        // valueRange max, not by scaling the source's per-voice peak.
-        //
-        // For a samplePlayer row, clamped to the trimmed sample range's
-        // own length when that's shorter than the gate -- bruit-kit's
-        // SamplePlayer hard-stops the raw buffer there regardless of gate
-        // (see its noteOn), so scheduling the curve over the *longer*
-        // gateSeconds would leave the user's own envelope shape -- in
-        // particular whatever release they drew near the end of it --
-        // silently pre-empted by that hard stop instead of actually
-        // playing out.
-        const envelopeDuration =
-          runtime.config.sourceType === "samplePlayer"
-            ? Math.min(gateSeconds, this.sampleRangeSeconds(runtime))
-            : gateSeconds;
-        scheduleAutomation(
-          runtime.envelopeGain.gain,
-          resolved.envelope.points,
-          this.audioContext,
-          envelopeDuration,
-          { min: 0, max: resolved.gain },
-          shiftedAtTime,
-        );
-        if (
-          runtime.config.sourceType === "samplePlayer" &&
-          runtime.config.continuePlayback &&
-          runtime.source.playFromPosition &&
-          runtime.sampleBuffer
-        ) {
-          const startFraction = this.advanceScanPosition(
-            runtime,
-            runtime.sampleBuffer,
-            shiftedAtTime,
-          );
-          runtime.source.playFromPosition(
-            note,
-            FULL_VELOCITY,
-            shiftedAtTime,
-            startFraction,
-          );
-        } else {
-          runtime.source.target.noteOn(note, FULL_VELOCITY, shiftedAtTime);
-        }
-        runtime.source.target.noteOff(note, shiftedAtTime + gateSeconds);
+        this.fireVoice(runtime, note, resolved, shiftedAtTime, gateSeconds);
       }
+    }
+  }
+
+  /** The envelope drives envelopeGain -- a persistent, row-wide node
+   * downstream of the source (see RowRuntime's doc), not a per-voice
+   * param -- so scheduling it here, immediately before the noteOn it
+   * shapes, is safe for the same reason mutating a source's own params
+   * used to be: both this method's two callers (fireTick's own main
+   * branch, and triggerCallResponse) own their entire scheduling call
+   * synchronously (unlike bruit-kit's createStepTrack, which this app
+   * deliberately doesn't use for exactly this reason), so the schedule
+   * and the noteOn it applies to happen together, both anchored at the
+   * same future atTime -- a *later* tick scheduling a new curve can't
+   * retroactively affect a voice already firing. Every noteOn goes out
+   * at full velocity since gain is entirely carried by this curve's own
+   * valueRange max, not by scaling the source's per-voice peak.
+   *
+   * For a samplePlayer row, clamped to the trimmed sample range's own
+   * length when that's shorter than the gate -- bruit-kit's SamplePlayer
+   * hard-stops the raw buffer there regardless of gate (see its noteOn),
+   * so scheduling the curve over the *longer* gateSeconds would leave
+   * the user's own envelope shape -- in particular whatever release they
+   * drew near the end of it -- silently pre-empted by that hard stop
+   * instead of actually playing out. */
+  private fireVoice(
+    runtime: RowRuntime,
+    note: number,
+    resolved: ResolvedCellConfig,
+    atTime: number,
+    gateSeconds: number,
+  ): void {
+    const envelopeDuration =
+      runtime.config.sourceType === "samplePlayer"
+        ? Math.min(gateSeconds, this.sampleRangeSeconds(runtime))
+        : gateSeconds;
+    scheduleAutomation(
+      runtime.envelopeGain.gain,
+      resolved.envelope.points,
+      this.audioContext,
+      envelopeDuration,
+      { min: 0, max: resolved.gain },
+      atTime,
+    );
+    if (
+      runtime.config.sourceType === "samplePlayer" &&
+      runtime.config.continuePlayback &&
+      runtime.source.playFromPosition &&
+      runtime.sampleBuffer
+    ) {
+      const startFraction = this.advanceScanPosition(
+        runtime,
+        runtime.sampleBuffer,
+        atTime,
+      );
+      runtime.source.playFromPosition(note, FULL_VELOCITY, atTime, startFraction);
+    } else {
+      runtime.source.target.noteOn(note, FULL_VELOCITY, atTime);
+    }
+    runtime.source.target.noteOff(note, atTime + gateSeconds);
+  }
+
+  /** Rolls RowConfig.callResponse's probability for `runtime` (already
+   * confirmed to have actually fired this tick -- see fireTick's own
+   * duck-scheduling call right above this one, which this mirrors) and,
+   * on a hit, fires `targetRowName`'s own row-level voice -- resolved
+   * via an always-on, unoverridden synthetic cell/column, since there's
+   * no specific cell here to pull a note/gain/envelope from -- after
+   * `delaySeconds`. Like duck, resolved by name at fire time rather
+   * than cached (see RowConfig.duck's own doc for why), and the
+   * target's own mute/solo state still gates it: a muted or soloed-out
+   * target stays silent even on a winning roll, same as it would for
+   * its own cells.
+   *
+   * Cascades: if the target it just fired *also* has its own
+   * callResponse set, this recurses to roll that hop too, anchored off
+   * the response it just scheduled -- a chain of rows each calling the
+   * next. `hopsRemaining` (defaults to MAX_CALL_RESPONSE_HOPS, only ever
+   * passed explicitly by this method's own recursive call) is the hard
+   * stop that keeps a cycle (A and B pointed at each other, or any
+   * longer loop) from recursing forever in one synchronous call -- see
+   * that constant's own doc. */
+  private triggerCallResponse(
+    runtime: RowRuntime,
+    callResponse: NonNullable<RowConfig["callResponse"]>,
+    atTime: number,
+    stepSeconds: number,
+    soloActive: boolean,
+    hopsRemaining: number = MAX_CALL_RESPONSE_HOPS,
+  ): void {
+    if (hopsRemaining <= 0) return;
+    const probability = Math.min(Math.max(callResponse.probability, 0), 1);
+    if (Math.random() >= probability) return;
+
+    const target = this.rows.find(
+      (r) => r !== runtime && r.config.name === callResponse.targetRowName,
+    );
+    if (!target) return;
+    if (!target.active || !target.config.enabled) return;
+    if (soloActive && !target.solo) return;
+
+    const rowDefaultGate = triggerModeGate(target.config.triggerMode);
+    const resolved = resolveCellConfig(
+      { ...createCellConfig(), on: true },
+      target.config,
+      createColumnConfig(),
+      this.precedence,
+      BUILT_INS,
+      rowDefaultGate,
+    );
+    const note =
+      target.config.sourceType === "samplePlayer" &&
+      target.config.playbackMode === "direct"
+        ? target.config.defaultNote
+        : quantizeToScale(resolved.note, this.scaleRoot, this.scaleType);
+    const gateSeconds = stepSeconds * resolved.gate;
+    const responseAtTime = atTime + Math.max(callResponse.delaySeconds, 0);
+    this.fireVoice(target, note, resolved, responseAtTime, gateSeconds);
+
+    if (target.config.callResponse?.targetRowName) {
+      this.triggerCallResponse(
+        target,
+        target.config.callResponse,
+        responseAtTime,
+        stepSeconds,
+        soloActive,
+        hopsRemaining - 1,
+      );
     }
   }
 

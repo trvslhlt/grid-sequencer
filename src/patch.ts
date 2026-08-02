@@ -63,6 +63,7 @@ export function serializePatch(
       sampleRange: row.config.sampleRange,
       reversed: row.config.reversed,
       duck: row.config.duck,
+      callResponse: row.config.callResponse,
       continuePlayback: row.config.continuePlayback,
       sourceParams: row.source.getParams(),
       sampleId: rowSampleIds.get(row.id) ?? null,
@@ -162,6 +163,7 @@ export async function duplicateRow(
     sampleRange: structuredClone(sourceRow.config.sampleRange),
     reversed: sourceRow.config.reversed,
     duck: structuredClone(sourceRow.config.duck),
+    callResponse: structuredClone(sourceRow.config.callResponse),
     continuePlayback: sourceRow.config.continuePlayback,
     sourceParams: structuredClone(sourceRow.source.getParams()),
     sampleId: rowSampleIds.get(sourceRow.id) ?? null,
@@ -204,6 +206,7 @@ async function addPatchRow(
   // added yet, since addPatchRow runs once per row in sequence here but
   // nothing reads this until playback actually fires a note.
   if (patchRow.duck) model.setRowDuck(row, patchRow.duck);
+  if (patchRow.callResponse) model.setRowCallResponse(row, patchRow.callResponse);
   if (patchRow.continuePlayback) {
     model.setRowContinuePlayback(row, true);
   }

@@ -1840,6 +1840,63 @@ function duckFields(row: Row, model: GridModel): Field[] {
   ];
 }
 
+/** Duck's sibling section -- same shape and same stale-closure fix as
+ * duckFields (see its own top comment): update() re-reads
+ * model.getRow fresh instead of trusting the `current` snapshot, since
+ * no render() happens between two fields committed back to back. */
+function callResponseFields(row: Row, model: GridModel): Field[] {
+  const defaults = {
+    targetRowName: "",
+    probability: 0.5,
+    delaySeconds: 0,
+  };
+  const current = row.config.callResponse ?? defaults;
+  const update = (patch: Partial<typeof defaults>): void => {
+    const latest = model.getRow(row.id)?.config.callResponse ?? defaults;
+    const next = { ...latest, ...patch };
+    model.setRowCallResponse(row, next.targetRowName ? next : undefined);
+  };
+
+  return [
+    {
+      key: "call-response-target",
+      label: "Response target row",
+      kind: "select",
+      value: current.targetRowName,
+      options: [
+        { value: "", label: "(None)" },
+        ...model
+          .getRows()
+          .filter((r) => r.id !== row.id)
+          .map((r) => ({ value: r.config.name, label: r.config.name })),
+      ],
+      onChange: (v) => update({ targetRowName: v }),
+    },
+    {
+      key: "call-response-probability",
+      label: "Probability",
+      kind: "range",
+      value: current.probability,
+      min: 0,
+      max: 1,
+      step: 0.01,
+      indented: true,
+      onChange: (v) => update({ probability: v }),
+    },
+    {
+      key: "call-response-delay",
+      label: "Delay (ms)",
+      kind: "range",
+      value: current.delaySeconds * 1000,
+      min: 0,
+      max: 1000,
+      step: 5,
+      indented: true,
+      onChange: (v) => update({ delaySeconds: v / 1000 }),
+    },
+  ];
+}
+
 /** Envelope is always a single consolidated override (like row/column
  * Defaults, unlike note/gain/gate/time-shift's per-field checkboxes) -- a
  * single breakpoint-curve editor (see fields.ts's "automation" kind),
@@ -2344,6 +2401,10 @@ export function createGridView(
         {
           title: "Duck",
           fields: duckFields(row, model),
+        },
+        {
+          title: "Call & Response",
+          fields: callResponseFields(row, model),
         },
       ],
     };

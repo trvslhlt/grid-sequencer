@@ -167,6 +167,25 @@ export interface RowConfig {
     attackMs: number;
     releaseMs: number;
   };
+  /** Duck's sibling: whenever THIS row actually fires (same gate as
+   * duck -- muted/soloed-out/cell-off rows trigger nothing), rolls
+   * `probability` (0..1) and on a hit fires `targetRowName`'s own
+   * row-level voice -- its defaultNote/defaultGain/envelope/gate,
+   * exactly as if it had fired an empty, unoverridden cell of its own,
+   * since there's no specific cell here to pull a note from -- landing
+   * `delaySeconds` after the call so the response reads as a reply
+   * rather than a doubled hit. Targeted by name, resolved live at fire
+   * time, same reasoning as duck's own doc (row ids regenerate on every
+   * patch load; renaming the target just goes quietly inert instead of
+   * erroring). The target's own mute/solo state still gates it: a
+   * muted or soloed-out target stays silent even on a winning roll,
+   * same as it would for its own cells. undefined, or an empty
+   * targetRowName, means no call-and-response. */
+  callResponse?: {
+    targetRowName: string;
+    probability: number;
+    delaySeconds: number;
+  };
   /** samplePlayer rows only: instead of every hit starting from the
    * trimmed range's own start (sampleRange.start), each hit picks up
    * from wherever a virtual "scan" position has advanced to since this

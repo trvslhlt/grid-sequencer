@@ -33,6 +33,14 @@ export interface PatchRow {
     releaseMs: number;
   };
   /** Optional, not required -- patches saved before this field existed
+   * have no such key at all; addPatchRow falls back to no call-and-
+   * response (the same default a freshly-added row already gets). */
+  callResponse?: {
+    targetRowName: string;
+    probability: number;
+    delaySeconds: number;
+  };
+  /** Optional, not required -- patches saved before this field existed
    * have no such key at all; addPatchRow falls back to `false` (the
    * same default a freshly-added row already gets), not a migration
    * system. */
