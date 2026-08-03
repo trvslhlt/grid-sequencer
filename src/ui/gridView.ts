@@ -1917,6 +1917,228 @@ function envelopeFields(
   ];
 }
 
+/** Everything about "what does this row sound like" -- source-specific
+ * params, samplePlayer's own playback-mode toggles, envelope, sample
+ * assignment/trim, and the pre-effects default-gain cascade fallback --
+ * all of which apply to (or inside) the source's own voice before this
+ * row's effects chain ever sees the signal. Launched from a button
+ * labeled with the row's own source type (see rowPanel); everything
+ * else about a row (sequencing, effects, output level, cross-row
+ * interactions) stays in the main panel behind it.
+ *
+ * Re-reads model.getRow(row.id) fresh at the top of every renderBody()
+ * call rather than trusting the `row` param across the popup's whole
+ * lifetime -- same staleness reasoning as duckFields' own update(): this
+ * row's config can already be stale by the time the button that opened
+ * this popup was clicked (a continuous control edited just before with
+ * no render() in between), and once open, every toggle inside the popup
+ * itself re-renders the same way. If the row's gone by the time a
+ * refresh happens (removed from behind the popup -- can't happen through
+ * this app's own UI today since the modal overlay blocks the row's own
+ * trash-icon button, but cheap to guard anyway), the popup just closes
+ * instead of rendering a stale/broken body. */
+function openInstrumentModal(
+  row: Row,
+  model: GridModel,
+  options: GridViewOptions,
+): void {
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  const modal = document.createElement("div");
+  modal.className = "modal instrument-modal";
+  overlay.appendChild(modal);
+
+  function close(): void {
+    overlay.remove();
+  }
+  overlay.addEventListener("click", (event) => {
+    if (event.target === overlay) close();
+  });
+
+  const header = document.createElement("div");
+  header.className = "modal-header";
+  const title = document.createElement("span");
+  title.className = "modal-title";
+  title.textContent = `Instrument: ${SOURCE_TYPE_LABELS[row.config.sourceType]}`;
+  const closeButton = document.createElement("button");
+  closeButton.textContent = "×";
+  closeButton.className = "modal-close-button";
+  closeButton.addEventListener("click", close);
+  header.append(title, closeButton);
+  modal.appendChild(header);
+
+  const body = document.createElement("div");
+  body.className = "modal-body";
+  modal.appendChild(body);
+
+  const footer = document.createElement("div");
+  footer.className = "modal-footer";
+  const savePresetButton = document.createElement("button");
+  savePresetButton.textContent = "Save as instrument preset…";
+  savePresetButton.addEventListener("click", () => {
+    const current = model.getRow(row.id);
+    if (!current) return;
+    const name = window.prompt("Name this instrument preset:");
+    if (!name?.trim()) return;
+    options.onSaveInstrumentPreset?.(current, name.trim());
+  });
+  footer.appendChild(savePresetButton);
+  modal.appendChild(footer);
+
+  function renderBody(): void {
+    const current = model.getRow(row.id);
+    if (!current) {
+      close();
+      return;
+    }
+
+    const fields: Field[] = [];
+
+    if (current.config.sourceType === "samplePlayer") {
+      fields.push({
+        key: "playbackMode",
+        label: "Playback",
+        kind: "select",
+        value: current.config.playbackMode,
+        options: ["direct", "pitched"],
+        onChange: (v) => {
+          model.setRowPlaybackMode(current, v as "direct" | "pitched");
+          renderBody();
+        },
+      });
+      // Non-destructive -- flips playback direction of whatever sample's
+      // loaded (or the next one assigned), leaves the library file alone.
+      // See the Manage Library page's own "Reverse" for the permanent,
+      // destructive version.
+      fields.push({
+        key: "reversed",
+        label: "Reverse playback",
+        kind: "checkbox",
+        value: current.config.reversed,
+        onChange: (v) => model.setRowReversed(current, v),
+      });
+      // Every hit starts from wherever a virtual scan position has
+      // advanced to since this row's last one -- see
+      // RowConfig.continuePlayback's own doc. No renderBody() needed:
+      // toggling this doesn't change which fields exist, just future
+      // firing behavior.
+      fields.push({
+        key: "continuePlayback",
+        label: "Continue from last position",
+        kind: "checkbox",
+        value: current.config.continuePlayback,
+        onChange: (v) => model.setRowContinuePlayback(current, v),
+      });
+    }
+
+    const sourceParams = current.source.getParams();
+    for (const field of current.source.paramFields) {
+      const value = sourceParams[field.key] ?? field.default;
+      if (field.kind === "select") {
+        fields.push({
+          key: field.key,
+          label: field.label,
+          kind: "select",
+          value: String(value),
+          options: field.options ?? [],
+          onChange: (v) => current.source.setParams({ [field.key]: v }),
+        });
+      } else {
+        fields.push({
+          key: field.key,
+          label: field.label,
+          kind: "range",
+          value: Number(value),
+          min: field.min ?? 0,
+          max: field.max ?? 1,
+          step: field.step ?? 0.01,
+          onChange: (v) => current.source.setParams({ [field.key]: v }),
+        });
+      }
+    }
+
+    if (current.source.needsSample) {
+      // Sample assignment happens via the main-page Sample Library panel
+      // now (select this row, click a sample there) -- this just shows
+      // what's already loaded. See GridViewOptions.getCurrentSampleName.
+      fields.push({
+        key: "currentSample",
+        label: "Sample",
+        kind: "text",
+        value: options.getCurrentSampleName?.(current) ?? "(none)",
+        readOnly: true,
+        onChange: () => {},
+      });
+    }
+
+    if (current.config.sourceType === "samplePlayer") {
+      const buffer = model.getRowSampleBuffer(current);
+      if (buffer) {
+        fields.push({
+          key: "sampleRange",
+          label: "Playback range (drag handles to trim)",
+          kind: "waveformRange",
+          buffer,
+          range: current.config.sampleRange,
+          onChange: (range) => model.setRowSampleRange(current, range),
+        });
+      }
+    }
+
+    body.innerHTML = "";
+    renderPanelSections(body, fields, [
+      {
+        title: "Envelope",
+        toggle: {
+          active: current.config.envelopeOverride,
+          onClick: () => {
+            model.setRowEnvelopeOverride(
+              current,
+              !current.config.envelopeOverride,
+            );
+            renderBody();
+          },
+        },
+        fields: envelopeFields(current.config.envelope, (points) =>
+          model.setRowEnvelope(current, points),
+        ),
+      },
+      {
+        // Scales envelopeGain, the same pre-effects node Envelope above
+        // drives -- see RowConfig.defaultGainOverride's own doc for why
+        // this lives here instead of the main panel's Output section
+        // alongside Send/Pan/Level.
+        title: "Default gain",
+        toggle: {
+          active: current.config.defaultGainOverride,
+          onClick: () => {
+            model.setRowDefaultGainOverride(
+              current,
+              !current.config.defaultGainOverride,
+            );
+            renderBody();
+          },
+        },
+        fields: [
+          {
+            key: "defaultGain",
+            label: "Default gain",
+            kind: "range",
+            value: current.config.defaultGain,
+            min: 0,
+            max: 1,
+            step: 0.01,
+            onChange: (v) => model.setRowDefaultGain(current, v),
+          },
+        ],
+      },
+    ]);
+  }
+
+  renderBody();
+  document.body.appendChild(overlay);
+}
+
 export interface PanelSection {
   title: string;
   fields: Field[];
@@ -1941,6 +2163,59 @@ interface PanelContent {
    * (awaits a source's own init, see GridModel's doc) via main.ts's
    * duplicateRow, same as the "+" row's onAddRow. */
   onDuplicate?: () => Promise<void>;
+}
+
+/** Renders a flat fields body (if any) followed by every titled,
+ * optionally toggle-gated section -- shared by render()'s own row/column/
+ * cell/master panel and openInstrumentModal's popup body, which needs the
+ * exact same fields-then-sections shape (Envelope, Default gain) inside a
+ * modal instead of the side panel. Appends into `container`, doesn't clear
+ * it first -- callers own their own container's lifecycle (render() tears
+ * down and rebuilds the whole panel every call; the modal's own
+ * renderBody() clears its body div before calling this). */
+function renderPanelSections(
+  container: HTMLElement,
+  fields: Field[],
+  sections: PanelSection[],
+): void {
+  if (fields.length > 0) {
+    const body = document.createElement("div");
+    body.className = "panel-body";
+    renderFields(body, fields);
+    container.appendChild(body);
+  }
+
+  for (const section of sections) {
+    const sectionEl = document.createElement("div");
+    sectionEl.className = "panel-section";
+
+    const sectionHeading = document.createElement("div");
+    sectionHeading.className = "panel-section-title-row";
+    const sectionTitle = document.createElement("span");
+    sectionTitle.className = "panel-section-title";
+    sectionTitle.textContent = section.title;
+    sectionHeading.appendChild(sectionTitle);
+    if (section.toggle) {
+      const button = document.createElement("button");
+      button.className = `panel-header-button${section.toggle.active ? " active" : ""}`;
+      button.textContent = "Override";
+      button.disabled = section.toggle.disabled ?? false;
+      button.title = button.disabled
+        ? "Already wins by the global row/column precedence setting -- an override here can't change that."
+        : "";
+      button.addEventListener("click", section.toggle.onClick);
+      sectionHeading.appendChild(button);
+    }
+    sectionEl.appendChild(sectionHeading);
+
+    const sectionBody = document.createElement("div");
+    const dimmed = section.toggle ? !section.toggle.active : false;
+    sectionBody.className = `panel-body dimmed-section${dimmed ? " dimmed" : ""}`;
+    renderFields(sectionBody, section.fields);
+    sectionEl.appendChild(sectionBody);
+
+    container.appendChild(sectionEl);
+  }
 }
 
 type Selection =
@@ -2097,6 +2372,11 @@ export function createGridView(
   }
 
   function rowPanel(row: Row): PanelContent {
+    // Enabled (mute) and Solo are both already reachable outside this
+    // panel -- clicking a row's own header toggles mute, and its "S"
+    // button toggles solo (see render()'s rowMaster/soloButton click
+    // handlers) -- so they don't need a redundant copy of the same
+    // control in here too.
     const fields: Field[] = [
       {
         key: "name",
@@ -2108,71 +2388,7 @@ export function createGridView(
           render();
         },
       },
-      {
-        key: "enabled",
-        label: "Enabled (unmuted)",
-        kind: "checkbox",
-        value: row.config.enabled,
-        onChange: (v) => {
-          model.setRowEnabled(row, v);
-          render();
-        },
-      },
-      {
-        // Not persisted, not part of RowConfig -- see RowRuntime's own doc
-        // on why solo resets to "none" on every patch load instead of
-        // round-tripping through save/load.
-        key: "solo",
-        label: "Solo",
-        kind: "checkbox",
-        value: row.isSoloed(),
-        onChange: (v) => {
-          model.setRowSolo(row, v);
-          render();
-        },
-      },
     ];
-
-    if (row.config.sourceType === "samplePlayer") {
-      fields.push({
-        key: "playbackMode",
-        label: "Playback",
-        kind: "select",
-        value: row.config.playbackMode,
-        options: ["direct", "pitched"],
-        onChange: (v) => {
-          model.setRowPlaybackMode(row, v as "direct" | "pitched");
-          render();
-        },
-      });
-      // Non-destructive -- flips playback direction of whatever sample's
-      // loaded (or the next one assigned), leaves the library file alone.
-      // See the Manage Library page's own "Reverse" for the permanent,
-      // destructive version.
-      fields.push({
-        key: "reversed",
-        label: "Reverse playback",
-        kind: "checkbox",
-        value: row.config.reversed,
-        onChange: (v) => {
-          model.setRowReversed(row, v);
-          render();
-        },
-      });
-      // Every hit starts from wherever a virtual scan position has
-      // advanced to since this row's last one (real elapsed time,
-      // wrapping at the trimmed range's own end) instead of always the
-      // range start -- see RowConfig.continuePlayback's own doc. No
-      // render() needed: toggling this doesn't change which fields
-      // exist, just future firing behavior.
-      fields.push({
-        key: "continuePlayback",
-        label: "Continue from last position",
-        kind: "checkbox",
-        value: row.config.continuePlayback,
-        onChange: (v) => model.setRowContinuePlayback(row, v),
-      });
-    }
 
     fields.push({
       key: "triggerMode",
@@ -2212,91 +2428,27 @@ export function createGridView(
       });
     }
 
+    // Everything about what this row actually sounds like (source
+    // params, envelope, sample assignment/trim, the pre-effects default-
+    // gain fallback) lives behind this button instead of cluttering the
+    // main panel -- see openInstrumentModal's own doc. Labeled with the
+    // row's own source type so it reads as "configure the instrument,"
+    // not a generic settings button.
     fields.push({
-      key: "sendLevel",
-      label: "Send",
-      kind: "range",
-      value: row.config.sendLevel,
-      min: 0,
-      max: 1,
-      step: 0.01,
-      onChange: (v) => model.setRowSendLevel(row, v),
-    });
-    fields.push({
-      key: "pan",
-      label: "Pan (L -1 .. 1 R)",
-      kind: "range",
-      value: row.config.pan,
-      min: -1,
-      max: 1,
-      step: 0.01,
-      onChange: (v) => model.setRowPan(row, v),
-    });
-
-    const sourceParams = row.source.getParams();
-    for (const field of row.source.paramFields) {
-      const current = sourceParams[field.key] ?? field.default;
-      if (field.kind === "select") {
-        fields.push({
-          key: field.key,
-          label: field.label,
-          kind: "select",
-          value: String(current),
-          options: field.options ?? [],
-          onChange: (v) => row.source.setParams({ [field.key]: v }),
-        });
-      } else {
-        fields.push({
-          key: field.key,
-          label: field.label,
-          kind: "range",
-          value: Number(current),
-          min: field.min ?? 0,
-          max: field.max ?? 1,
-          step: field.step ?? 0.01,
-          onChange: (v) => row.source.setParams({ [field.key]: v }),
-        });
-      }
-    }
-
-    if (row.source.needsSample) {
-      // Sample assignment happens via the main-page Sample Library panel
-      // now (select this row, click a sample there) -- this just shows
-      // what's already loaded. See GridViewOptions.getCurrentSampleName.
-      fields.push({
-        key: "currentSample",
-        label: "Sample",
-        kind: "text",
-        value: options.getCurrentSampleName?.(row) ?? "(none)",
-        readOnly: true,
-        onChange: () => {},
-      });
-    }
-
-    fields.push({
-      key: "saveInstrumentPreset",
-      label: "Save as instrument preset…",
+      key: "openInstrument",
+      label: `${SOURCE_TYPE_LABELS[row.config.sourceType]}…`,
       kind: "button",
       onClick: () => {
-        const name = window.prompt("Name this instrument preset:");
-        if (!name?.trim()) return;
-        options.onSaveInstrumentPreset?.(row, name.trim());
+        // Not the `row` param directly -- same staleness reasoning as
+        // onDuplicate below (a continuous control edited just before this
+        // button was clicked, with no render() in between, would leave
+        // `row` stale). openInstrumentModal re-reads model.getRow(row.id)
+        // again itself on every internal render too, this first read is
+        // just to seed the modal with an id that's confirmed to exist.
+        const current = model.getRow(row.id);
+        if (current) openInstrumentModal(current, model, options);
       },
     });
-
-    if (row.config.sourceType === "samplePlayer") {
-      const buffer = model.getRowSampleBuffer(row);
-      if (buffer) {
-        fields.push({
-          key: "sampleRange",
-          label: "Playback range (drag handles to trim)",
-          kind: "waveformRange",
-          buffer,
-          range: row.config.sampleRange,
-          onChange: (range) => model.setRowSampleRange(row, range),
-        });
-      }
-    }
 
     return {
       title: `Row: ${row.config.name}`,
@@ -2327,6 +2479,11 @@ export function createGridView(
         : undefined,
       sections: [
         {
+          // Note/nudge only now -- defaultGain has its own override flag
+          // and lives in the Instrument popup instead (see
+          // RowConfig.defaultGainOverride's own doc). These two stay here
+          // since they're sequencer/cascade concerns, independent of the
+          // instrument, same category as Trigger mode above.
           title: "Defaults",
           toggle: {
             active: row.config.defaultsOverride,
@@ -2347,16 +2504,6 @@ export function createGridView(
               onChange: (v) => model.setRowDefaultNote(row, v),
             },
             {
-              key: "defaultGain",
-              label: "Default gain",
-              kind: "range",
-              value: row.config.defaultGain,
-              min: 0,
-              max: 1,
-              step: 0.01,
-              onChange: (v) => model.setRowDefaultGain(row, v),
-            },
-            {
               key: "timeShift",
               label: "Default nudge (ms)",
               kind: "range",
@@ -2367,19 +2514,6 @@ export function createGridView(
               onChange: (v) => model.setRowDefaultTimeShift(row, v / 1000),
             },
           ],
-        },
-        {
-          title: "Envelope",
-          toggle: {
-            active: row.config.envelopeOverride,
-            onClick: () => {
-              model.setRowEnvelopeOverride(row, !row.config.envelopeOverride);
-              render();
-            },
-          },
-          fields: envelopeFields(row.config.envelope, (points) =>
-            model.setRowEnvelope(row, points),
-          ),
         },
         {
           title: "Effects",
@@ -2399,12 +2533,50 @@ export function createGridView(
           ),
         },
         {
-          title: "Duck",
-          fields: duckFields(row, model),
+          // Everything here is downstream of the effects chain (duckGain
+          // -> panNode -> levelNode -> master/send, see addRow) -- a
+          // channel-strip mixer group, not an insert effect.
+          title: "Output",
+          fields: [
+            {
+              key: "sendLevel",
+              label: "Send",
+              kind: "range",
+              value: row.config.sendLevel,
+              min: 0,
+              max: 1,
+              step: 0.01,
+              onChange: (v) => model.setRowSendLevel(row, v),
+            },
+            {
+              key: "pan",
+              label: "Pan (L -1 .. 1 R)",
+              kind: "range",
+              value: row.config.pan,
+              min: -1,
+              max: 1,
+              step: 0.01,
+              onChange: (v) => model.setRowPan(row, v),
+            },
+            {
+              key: "level",
+              label: "Level",
+              kind: "range",
+              value: row.config.level,
+              min: 0,
+              max: 1.5,
+              step: 0.01,
+              onChange: (v) => model.setRowLevel(row, v),
+            },
+          ],
         },
         {
-          title: "Call & Response",
-          fields: callResponseFields(row, model),
+          // Duck and Call & Response together -- neither touches this
+          // row's own signal or its instrument, both are "when I fire,
+          // do something to a different row" behaviors, so they share one
+          // section instead of the mixer/instrument split above.
+          title: "Interaction",
+          fields: [...duckFields(row, model), ...callResponseFields(row, model)],
         },
       ],
     };
@@ -2838,44 +3010,7 @@ export function createGridView(
         "Right-click a cell, a row label, or a column header to edit it here.";
       panel.appendChild(hint);
     } else {
-      if (fields.length > 0) {
-        const body = document.createElement("div");
-        body.className = "panel-body";
-        renderFields(body, fields);
-        panel.appendChild(body);
-      }
-
-      for (const section of sections) {
-        const sectionEl = document.createElement("div");
-        sectionEl.className = "panel-section";
-
-        const sectionHeading = document.createElement("div");
-        sectionHeading.className = "panel-section-title-row";
-        const sectionTitle = document.createElement("span");
-        sectionTitle.className = "panel-section-title";
-        sectionTitle.textContent = section.title;
-        sectionHeading.appendChild(sectionTitle);
-        if (section.toggle) {
-          const button = document.createElement("button");
-          button.className = `panel-header-button${section.toggle.active ? " active" : ""}`;
-          button.textContent = "Override";
-          button.disabled = section.toggle.disabled ?? false;
-          button.title = button.disabled
-            ? "Already wins by the global row/column precedence setting -- an override here can't change that."
-            : "";
-          button.addEventListener("click", section.toggle.onClick);
-          sectionHeading.appendChild(button);
-        }
-        sectionEl.appendChild(sectionHeading);
-
-        const sectionBody = document.createElement("div");
-        const dimmed = section.toggle ? !section.toggle.active : false;
-        sectionBody.className = `panel-body dimmed-section${dimmed ? " dimmed" : ""}`;
-        renderFields(sectionBody, section.fields);
-        sectionEl.appendChild(sectionBody);
-
-        panel.appendChild(sectionEl);
-      }
+      renderPanelSections(panel, fields, sections);
     }
 
     layout.appendChild(grid);

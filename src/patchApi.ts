@@ -15,6 +15,10 @@ export interface PatchRow {
   defaultsOverride: boolean;
   defaultNote: number;
   defaultGain: number;
+  /** Optional, not required -- patches saved before defaultGain split off
+   * its own override flag (see RowConfig.defaultGainOverride's own doc)
+   * have no such key at all; addPatchRow falls back to `false`. */
+  defaultGainOverride?: boolean;
   defaultTimeShiftSeconds: number;
   envelopeOverride: boolean;
   envelope: unknown;
@@ -24,6 +28,10 @@ export interface PatchRow {
    * have no such key at all; addPatchRow falls back to `0` (center,
    * the same default a freshly-added row already gets). */
   pan?: number;
+  /** Optional, not required -- patches saved before this field existed
+   * have no such key at all; addPatchRow falls back to `1` (unity, the
+   * same default a freshly-added row already gets). */
+  level?: number;
   sampleRange: { start: number; end: number };
   reversed: boolean;
   duck?: {

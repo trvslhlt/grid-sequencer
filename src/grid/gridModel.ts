@@ -173,6 +173,11 @@ interface RowRuntime {
    * needs to reconnect it (setRowEffects only ever swaps `chain`,
    * upstream of both of these). */
   readonly panNode: StereoPannerNode;
+  /** Sits right after panNode, before the split to this row's two normal
+   * destinations -- see RowConfig.level's own doc for why it scales both
+   * of them together. Persistent for the row's whole lifetime, same
+   * reasoning as duckGain/panNode. */
+  readonly levelNode: GainNode;
   send: Send;
   sampleBuffer: AudioBuffer | undefined;
   active: boolean;
@@ -415,13 +420,15 @@ export class GridModel {
       playbackMode: "direct",
       defaultsOverride: false,
       defaultNote: BUILT_INS.note,
-      defaultGain: BUILT_INS.gain,
       defaultTimeShiftSeconds: BUILT_INS.timeShiftSeconds,
+      defaultGainOverride: false,
+      defaultGain: BUILT_INS.gain,
       envelopeOverride: false,
       envelope: createEnvelope(),
       effects: [],
       sendLevel: 0,
       pan: 0,
+      level: 1,
       sampleRange: { start: 0, end: 1 },
       reversed: false,
       duck: undefined,
@@ -464,12 +471,17 @@ export class GridModel {
     duckGain.gain.value = 1;
     const panNode = this.audioContext.createStereoPanner();
     panNode.pan.value = 0;
+    // Sits after panNode, before the split to masterGain/send -- see
+    // RowConfig.level's own doc for why both destinations scale together.
+    const levelNode = this.audioContext.createGain();
+    levelNode.gain.value = config.level;
     chain.output.connect(duckGain);
     duckGain.connect(panNode);
-    panNode.connect(this.masterGain);
+    panNode.connect(levelNode);
+    levelNode.connect(this.masterGain);
     envelopeGain.connect(chain.input);
     const send = createSend(this.audioContext, this.sendBusInput, 0);
-    panNode.connect(send.input);
+    levelNode.connect(send.input);
 
     const runtime: RowRuntime = {
       id: crypto.randomUUID(),
@@ -480,6 +492,7 @@ export class GridModel {
       chain,
       duckGain,
       panNode,
+      levelNode,
       send,
       sampleBuffer: undefined,
       active: !joinAtNextCycle,
@@ -500,6 +513,7 @@ export class GridModel {
     runtime.send.input.disconnect();
     runtime.duckGain.disconnect();
     runtime.panNode.disconnect();
+    runtime.levelNode.disconnect();
     // Never shared with anything else (see addRow's own doc), so a blanket
     // dispose is safe -- no other row's dry path or send routes through
     // this same chain instance.
@@ -566,9 +580,9 @@ export class GridModel {
     if (runtime) runtime.config = { ...runtime.config, playbackMode };
   }
 
-  /** Governs all three defaults (note/gain/time-shift) together -- see
-   * config.ts's RowConfig doc for why a single flag replaced three
-   * independent "is this one set" checks. */
+  /** Governs defaultNote/defaultTimeShiftSeconds together -- see
+   * config.ts's RowConfig.defaultsOverride doc for why defaultGain has
+   * its own separate flag (setRowDefaultGainOverride) instead. */
   setRowDefaultsOverride(row: Row, on: boolean): void {
     const runtime = this.findRuntime(row);
     if (runtime) runtime.config = { ...runtime.config, defaultsOverride: on };
@@ -589,6 +603,15 @@ export class GridModel {
   setRowDefaultGain(row: Row, gain: number): void {
     const runtime = this.findRuntime(row);
     if (runtime) runtime.config = { ...runtime.config, defaultGain: gain };
+  }
+
+  /** Separate from setRowDefaultsOverride -- see config.ts's
+   * RowConfig.defaultGainOverride doc for why gain split off on its own. */
+  setRowDefaultGainOverride(row: Row, on: boolean): void {
+    const runtime = this.findRuntime(row);
+    if (runtime) {
+      runtime.config = { ...runtime.config, defaultGainOverride: on };
+    }
   }
 
   setRowDefaultTimeShift(row: Row, seconds: number): void {
@@ -626,6 +649,17 @@ export class GridModel {
     const clamped = Math.min(Math.max(pan, -1), 1);
     runtime.panNode.pan.value = clamped;
     runtime.config = { ...runtime.config, pan: clamped };
+  }
+
+  /** No clamping, same as setMasterGain -- unlike pan, values outside the
+   * slider's own default range are still musically meaningful (just
+   * louder/quieter), not nonsensical the way an out-of-range pan would
+   * be. */
+  setRowLevel(row: Row, level: number): void {
+    const runtime = this.findRuntime(row);
+    if (!runtime) return;
+    runtime.levelNode.gain.value = level;
+    runtime.config = { ...runtime.config, level };
   }
 
   /** Just records the config -- unlike sendLevel (a live gain value set

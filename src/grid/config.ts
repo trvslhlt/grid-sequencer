@@ -101,15 +101,32 @@ export interface RowConfig {
    * the resolved cascade note like a synth-like row. Ignored by every
    * other source type, which are inherently pitched. */
   playbackMode: "direct" | "pitched";
-  /** One toggle governs all three defaults together (see the panel's
-   * single "Override" button per row/column) -- they're always-present
-   * values, editable and previewable whether or not this row currently
-   * contributes them to the cascade, same reasoning as CellConfig.effects
-   * staying live while effectsOverride is off. */
+  /** Governs defaultNote/defaultTimeShiftSeconds together (see the panel's
+   * own "Override" button in the row's Defaults section) -- these are
+   * sequencer/cascade concerns, independent of the instrument, so they
+   * share one toggle the same way column defaults do. defaultGain used to
+   * be part of this same toggle, but it scales envelopeGain -- the same
+   * pre-effects node the instrument's own Envelope curve drives -- so it's
+   * gated by its own defaultGainOverride instead and lives in the
+   * Instrument popup, not here. Always-present values, editable and
+   * previewable whether or not this row currently contributes them to the
+   * cascade, same reasoning as CellConfig.effects staying live while
+   * effectsOverride is off. */
   defaultsOverride: boolean;
   defaultNote: number;
-  defaultGain: number;
   defaultTimeShiftSeconds: number;
+  /** Scales envelopeGain -- pre-effects, the same node the Envelope curve
+   * itself drives (see envelope's own doc) -- unlike sendLevel/pan/level
+   * below, which are all downstream of the effects chain. Lives in the
+   * Instrument popup for that reason: an effect reacts to a gain change
+   * here the same way it reacts to an Envelope change, not the way it
+   * reacts to Pan (which never touches the signal). Gated by its own
+   * defaultGainOverride, separate from defaultsOverride above, since it's
+   * a different category of default (instrument, not sequencer) even
+   * though the *mechanism* -- a cascade fallback for cells with no gain of
+   * their own -- is identical to defaultNote's. */
+  defaultGainOverride: boolean;
+  defaultGain: number;
   envelopeOverride: boolean;
   envelope: EnvelopeParams;
   /** This row's persistent effect chain, built once and never torn down
@@ -132,6 +149,18 @@ export interface RowConfig {
    * both paths alike" positioning as duckGain, sitting right after it
    * in the signal path (see addRow). */
   pan: number;
+  /** A plain always-on multiplier on GridModel's own RowRuntime.levelNode,
+   * default 1 (unity) -- same category as pan/sendLevel (a channel-strip
+   * mixer control, not an insert effect, no override/cascade concept the
+   * way defaultGain has). Sits right after panNode, before the split to
+   * masterGain and the send-bus tap (see addRow), so it scales both this
+   * row's dry output and its send-bus contribution together -- turning a
+   * row's Level down turns its reverb tail down too, the common "channel
+   * fader" convention. Distinct from defaultGain, which scales a
+   * *pre-effects* node (envelopeGain) and only ever applies as a cascade
+   * fallback for cells with no gain of their own -- this applies
+   * unconditionally, downstream of everything, the same way pan does. */
+  level: number;
   /** samplePlayer rows only: 0..1 fractions of the loaded sample's own
    * duration, trimming which portion actually plays (see bruit-kit's
    * SamplePlayerParams.rangeStart/rangeEnd, which this maps straight onto).
@@ -322,7 +351,10 @@ export function resolveCellConfig(
   // precedence -- that would make the *other* side's own Override toggle
   // permanently inert, which is exactly the bug this cascade must avoid.
   const rowDefaultNote = row.defaultsOverride ? row.defaultNote : undefined;
-  const rowDefaultGain = row.defaultsOverride ? row.defaultGain : undefined;
+  // Its own separate toggle, not row.defaultsOverride -- see
+  // RowConfig.defaultGainOverride's own doc for why gain split off from
+  // the note/shift pair.
+  const rowDefaultGain = row.defaultGainOverride ? row.defaultGain : undefined;
   const rowDefaultShift = row.defaultsOverride
     ? row.defaultTimeShiftSeconds
     : undefined;
