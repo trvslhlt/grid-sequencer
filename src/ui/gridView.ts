@@ -2336,6 +2336,19 @@ export function createGridView(
   let selection: Selection = null;
   let cellEls: HTMLDivElement[][] = [];
 
+  // Click-and-drag paint (see the cell mousedown/mouseenter handlers
+  // below): the cell under the pointer at mousedown toggles immediately,
+  // then every *other* cell the pointer enters while the button is still
+  // down toggles once each -- dragPaintedCells guards against re-toggling
+  // a cell the drag re-crosses (e.g. a wobbly diagonal drag). A window-
+  // level mouseup (rather than one on each cell) is what actually ends the
+  // drag, since the button can be released anywhere, not just over a cell.
+  let isDragPainting = false;
+  let dragPaintedCells = new Set<string>();
+  window.addEventListener("mouseup", () => {
+    isDragPainting = false;
+  });
+
   function select(next: Selection): void {
     selection = next;
     render();
@@ -2998,7 +3011,20 @@ export function createGridView(
           selection.rowId === row.id &&
           selection.columnIndex === columnIndex;
         cellEl.className = `cell${cell.on ? " on" : ""}${overridden ? " overridden" : ""}${cellSelected ? " selected" : ""}`;
-        cellEl.addEventListener("click", () => {
+        const cellKey = `${row.id}:${columnIndex}`;
+        cellEl.addEventListener("mousedown", (event) => {
+          if (event.button !== 0) return;
+          // Not a native drag/text-selection gesture -- this is our own
+          // paint gesture, not the browser's.
+          event.preventDefault();
+          isDragPainting = true;
+          dragPaintedCells = new Set([cellKey]);
+          model.setCell(row, columnIndex, { on: !cell.on });
+          render();
+        });
+        cellEl.addEventListener("mouseenter", () => {
+          if (!isDragPainting || dragPaintedCells.has(cellKey)) return;
+          dragPaintedCells.add(cellKey);
           model.setCell(row, columnIndex, { on: !cell.on });
           render();
         });
