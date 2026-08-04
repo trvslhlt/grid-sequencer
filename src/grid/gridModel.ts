@@ -118,6 +118,7 @@ function createColumnConfig(): ColumnConfig {
     defaultsOverride: false,
     defaultNote: BUILT_INS.note,
     defaultGain: BUILT_INS.gain,
+    defaultGateOverride: false,
     defaultGate: BUILT_INS.gate,
     defaultTimeShiftSeconds: BUILT_INS.timeShiftSeconds,
     envelopeOverride: false,
@@ -421,6 +422,7 @@ export class GridModel {
       defaultsOverride: false,
       defaultNote: BUILT_INS.note,
       defaultTimeShiftSeconds: BUILT_INS.timeShiftSeconds,
+      probability: 1,
       defaultGainOverride: false,
       defaultGain: BUILT_INS.gain,
       envelopeOverride: false,
@@ -621,6 +623,16 @@ export class GridModel {
     }
   }
 
+  /** Clamped, same as duck's amount/call-response's probability -- see
+   * RowConfig.probability's own doc for why this applies unconditionally
+   * rather than being gated by defaultsOverride. */
+  setRowProbability(row: Row, probability: number): void {
+    const runtime = this.findRuntime(row);
+    if (!runtime) return;
+    const clamped = Math.min(Math.max(probability, 0), 1);
+    runtime.config = { ...runtime.config, probability: clamped };
+  }
+
   setRowEnvelopeOverride(row: Row, on: boolean): void {
     const runtime = this.findRuntime(row);
     if (runtime) runtime.config = { ...runtime.config, envelopeOverride: on };
@@ -763,7 +775,6 @@ export class GridModel {
       runtime.config,
       this.columns[columnIndex],
       this.precedence,
-      BUILT_INS,
       rowDefaultGate,
     );
   }
@@ -921,10 +932,19 @@ export class GridModel {
         runtime.config,
         column,
         this.precedence,
-        BUILT_INS,
         rowDefaultGate,
       );
       if (!resolved.fires) continue;
+      // Rolled once per armed step, independent of note/gain/gate -- see
+      // RowConfig.probability's own doc. probability < 1 short-circuits
+      // the Math.random() call entirely for the (default, common) case
+      // where every armed step should just fire.
+      if (
+        runtime.config.probability < 1 &&
+        Math.random() >= runtime.config.probability
+      ) {
+        continue;
+      }
 
       const shiftedAtTime = atTime + resolved.timeShiftSeconds;
       if (runtime.config.duck?.targetRowName) {
@@ -1051,8 +1071,16 @@ export class GridModel {
       { ...createCellConfig(), on: true },
       runtime.config,
       createColumnConfig(),
-      this.precedence,
-      BUILT_INS,
+      // Forced "row", not this.precedence -- the column here is a fresh,
+      // synthetic stand-in (there's no real grid column in play for a
+      // preview or a call-response target), and under
+      // pickByPrecedence's "winner always contributes unconditionally"
+      // model, a synthetic column with the actual global precedence set
+      // to "column" would silently win with its own untouched defaults,
+      // shadowing this row's real ones. Forcing "row" guarantees the
+      // row's own defaults always win here, which is the entire point of
+      // this method: what this row itself would sound like.
+      "row",
       rowDefaultGate,
     );
     const note =

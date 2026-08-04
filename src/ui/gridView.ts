@@ -2102,7 +2102,14 @@ function openInstrumentModal(
       {
         title: "Envelope",
         toggle: {
-          active: current.config.envelopeOverride,
+          // Disabled (and forced on) while this row already wins the
+          // global Row/column precedence race -- see
+          // RowConfig.defaultsOverride's own doc for why toggling a
+          // winning side's own Override can't change an outcome it
+          // already controls; only the column's own Override (in the
+          // column panel) can flip this row's envelope in that case.
+          active: model.precedence === "row" || current.config.envelopeOverride,
+          disabled: model.precedence === "row",
           onClick: () => {
             model.setRowEnvelopeOverride(
               current,
@@ -2122,7 +2129,8 @@ function openInstrumentModal(
         // alongside Send/Pan/Level.
         title: "Default gain",
         toggle: {
-          active: current.config.defaultGainOverride,
+          active: model.precedence === "row" || current.config.defaultGainOverride,
+          disabled: model.precedence === "row",
           onClick: () => {
             model.setRowDefaultGainOverride(
               current,
@@ -2213,7 +2221,7 @@ function renderPanelSections(
       button.textContent = "Override";
       button.disabled = section.toggle.disabled ?? false;
       button.title = button.disabled
-        ? "Already wins by the global row/column precedence setting -- an override here can't change that."
+        ? "Already wins by the global row/column precedence setting, so its values apply automatically -- to use the other side's values instead, turn on its own Override there."
         : "";
       button.addEventListener("click", section.toggle.onClick);
       sectionHeading.appendChild(button);
@@ -2505,7 +2513,14 @@ export function createGridView(
           // instrument, same category as Trigger mode above.
           title: "Defaults",
           toggle: {
-            active: row.config.defaultsOverride,
+            // Disabled (and forced on) while this row already wins the
+            // global Row/column precedence race -- an override here
+            // can't change an outcome it already controls; only the
+            // column's own Override (in the column panel) can flip
+            // this row's note/nudge default in that case. See
+            // RowConfig.defaultsOverride's own doc.
+            active: model.precedence === "row" || row.config.defaultsOverride,
+            disabled: model.precedence === "row",
             onClick: () => {
               model.setRowDefaultsOverride(row, !row.config.defaultsOverride);
               render();
@@ -2531,6 +2546,24 @@ export function createGridView(
               max: 100,
               step: 5,
               onChange: (v) => model.setRowDefaultTimeShift(row, v / 1000),
+            },
+            {
+              // Unlike its two siblings above, not gated by this
+              // section's own Override toggle -- see
+              // RowConfig.probability's own doc for why: it's a per-tick
+              // firing gate applied to every armed cell, not a cascade
+              // fallback for cells with no value of their own, so tying
+              // it to "does my default note/nudge apply" would silently
+              // change how often hand-set cells fire. Grouped here
+              // visually anyway since it's still a row-level default.
+              key: "probability",
+              label: "Probability",
+              kind: "range",
+              value: row.config.probability,
+              min: 0,
+              max: 1,
+              step: 0.01,
+              onChange: (v) => model.setRowProbability(row, v),
             },
           ],
         },
@@ -2621,7 +2654,16 @@ export function createGridView(
         {
           title: "Defaults",
           toggle: {
-            active: column.defaultsOverride,
+            // Disabled (and forced on) while this column already wins
+            // the global Row/column precedence race -- see
+            // RowConfig.defaultsOverride's own doc for the row-side
+            // equivalent; only a row's own Override (in that row's
+            // panel) can flip this column's note/gain/nudge default in
+            // that case. Doesn't gate Default gate below -- see
+            // ColumnConfig.defaultGateOverride's own doc for why that
+            // one's independent of precedence entirely.
+            active: model.precedence === "column" || column.defaultsOverride,
+            disabled: model.precedence === "column",
             onClick: () => {
               model.setColumn(columnIndex, {
                 defaultsOverride: !column.defaultsOverride,
@@ -2651,13 +2693,22 @@ export function createGridView(
               onChange: (v) => model.setColumn(columnIndex, { defaultGain: v }),
             },
             {
+              // Its own independent toggle, not part of the section's
+              // shared one -- a row has no gate default of its own to
+              // race against (see ColumnConfig.defaultGateOverride's own
+              // doc), so unlike note/gain/nudge above, this is never
+              // disabled by precedence and needs its own on/off state
+              // instead of inheriting the section's.
               key: "defaultGate",
               label: "Default gate",
-              kind: "range",
+              kind: "override",
+              overridden: column.defaultGateOverride,
               value: column.defaultGate,
               min: 0,
               max: 4,
               step: 0.05,
+              onToggle: (on) =>
+                model.setColumn(columnIndex, { defaultGateOverride: on }),
               onChange: (v) => model.setColumn(columnIndex, { defaultGate: v }),
             },
             {
@@ -2678,7 +2729,8 @@ export function createGridView(
         {
           title: "Envelope",
           toggle: {
-            active: column.envelopeOverride,
+            active: model.precedence === "column" || column.envelopeOverride,
+            disabled: model.precedence === "column",
             onClick: () => {
               model.setColumn(columnIndex, {
                 envelopeOverride: !column.envelopeOverride,

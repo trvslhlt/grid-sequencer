@@ -111,10 +111,31 @@ export interface RowConfig {
    * Instrument popup, not here. Always-present values, editable and
    * previewable whether or not this row currently contributes them to the
    * cascade, same reasoning as CellConfig.effects staying live while
-   * effectsOverride is off. */
+   * effectsOverride is off. Only actually consulted when this row is the
+   * *losing* side of the global Row/column precedence setting -- when
+   * precedence favors row, this row's defaultNote/defaultTimeShiftSeconds
+   * apply unconditionally regardless of this flag (see
+   * resolveCellConfig's pickByPrecedence), so gridView.ts shows this
+   * toggle as on-and-disabled in that case rather than reading whatever
+   * it's actually set to. */
   defaultsOverride: boolean;
   defaultNote: number;
   defaultTimeShiftSeconds: number;
+  /** 0..1, default 1 (always fires) -- rolled once per tick for every
+   * armed (cell.on) step of this row, independent of defaultsOverride:
+   * unlike defaultNote/defaultTimeShiftSeconds, this isn't a cascade
+   * fallback for cells with no value of their own, it's a per-tick gate
+   * that applies uniformly to every cell this row fires, whether or not
+   * that cell has its own note/gain/gate set. Tying it to the same
+   * toggle as the cascade fallbacks would make turning Override on/off
+   * for "does my default note apply" also silently change how often
+   * hand-set cells fire, which is a confusing coupling of two unrelated
+   * concerns -- so it's always active instead. Lives in the row panel's
+   * Defaults section purely for UI grouping (see gridView.ts's rowPanel);
+   * GridModel.fireTick applies it directly, not through
+   * resolveCellConfig's cascade -- no per-column or per-cell probability
+   * exists (yet), just this one row-wide knob. */
+  probability: number;
   /** Scales envelopeGain -- pre-effects, the same node the Envelope curve
    * itself drives (see envelope's own doc) -- unlike sendLevel/pan/level
    * below, which are all downstream of the effects chain. Lives in the
@@ -124,7 +145,9 @@ export interface RowConfig {
    * defaultGainOverride, separate from defaultsOverride above, since it's
    * a different category of default (instrument, not sequencer) even
    * though the *mechanism* -- a cascade fallback for cells with no gain of
-   * their own -- is identical to defaultNote's. */
+   * their own -- is identical to defaultNote's. Same precedence-winner
+   * exemption as defaultsOverride: only consulted when this row is the
+   * losing side for gain specifically (see resolveCellConfig). */
   defaultGainOverride: boolean;
   defaultGain: number;
   envelopeOverride: boolean;
@@ -239,9 +262,22 @@ export interface ColumnConfig {
   /** Column-master on/off: false skips this step index for every row,
    * regardless of any row's own cell state. */
   enabled: boolean;
+  /** Governs defaultNote/defaultGain/defaultTimeShiftSeconds together --
+   * unlike RowConfig.defaultsOverride, this one flag still covers gain
+   * too (no popup split needed on the column side, since a column has no
+   * instrument to separate it from). Doesn't govern defaultGate -- see
+   * defaultGateOverride's own doc for why that one's independent. */
   defaultsOverride: boolean;
   defaultNote: number;
   defaultGain: number;
+  /** Row has no gate concept of its own to race against (a row's gate
+   * always comes from its trigger mode, see GridModel's rowDefaultGate) --
+   * so unlike note/gain/timeShift, there's no "row vs. column, whichever
+   * the precedence setting favors" question for gate at all, just "does
+   * the column have one, or not." Its own flag, independent of
+   * defaultsOverride, so it's never disabled by precedence the way that
+   * one now is (see gridView.ts's columnPanel). */
+  defaultGateOverride: boolean;
   defaultGate: number;
   defaultTimeShiftSeconds: number;
   envelopeOverride: boolean;
@@ -283,50 +319,47 @@ export interface ResolvedCellConfig {
   effects: EffectSpec[];
 }
 
-export interface BuiltInDefaults {
-  note: number;
-  gain: number;
-  gate: number;
-  timeShiftSeconds: number;
-  envelope: EnvelopeParams;
-}
-
-function pick(
+/** Whichever side the global Row/column precedence setting favors
+ * contributes its raw value *unconditionally* -- the losing side only
+ * takes over when it explicitly opts in via `loserOverride`. This is
+ * deliberately not symmetric with the losing side's own state the way an
+ * earlier version of this cascade was: a row/column always has *some*
+ * concrete default value (never undefined at the type level, seeded from
+ * BUILT_INS when the row/column is created), so the winning side never
+ * needs its own Override flag consulted at all -- it always contributes.
+ * Only the losing side needs a flag, to escape hatch out of losing.
+ * gridView.ts's row/column panels reflect this: the winning side's own
+ * Override button is shown on and disabled (toggling it can't change an
+ * outcome it already controls), only the losing side's is interactive.
+ * `winnerValue`/`loserValue` are already precedence-ordered by the
+ * caller. */
+function pickByPrecedence(
   cellValue: number | undefined,
-  rowValue: number | undefined,
-  columnValue: number | undefined,
-  precedence: Precedence,
-  builtIn: number,
+  winnerValue: number,
+  loserValue: number,
+  loserOverride: boolean,
 ): number {
   if (cellValue !== undefined) return cellValue;
-  const primary = precedence === "row" ? rowValue : columnValue;
-  const secondary = precedence === "row" ? columnValue : rowValue;
-  if (primary !== undefined) return primary;
-  if (secondary !== undefined) return secondary;
-  return builtIn;
+  return loserOverride ? loserValue : winnerValue;
 }
 
 /** Unlike every numeric default, a breakpoint curve can't be usefully
  * merged field-by-field across cell/row/column -- there's no sensible
  * meaning to "this point from the cell, that point from the row." So the
  * whole points array is picked from a single winning level instead of
- * `pick()`'s per-field cascade, same precedence order otherwise. */
+ * `pickByPrecedence`'s per-field cascade, same precedence-winner-unless-
+ * loser-overrides reasoning otherwise (see its own doc). */
 function pickEnvelope(
   cell: { envelopeOverride: boolean; envelope: EnvelopeParams },
   row: { envelopeOverride: boolean; envelope: EnvelopeParams },
   column: { envelopeOverride: boolean; envelope: EnvelopeParams },
   precedence: Precedence,
-  builtIn: EnvelopeParams,
 ): EnvelopeParams {
   if (cell.envelopeOverride) return cell.envelope;
-  // Only a side with its own override actually on contributes --
-  // precedence just tie-breaks when *both* are on, see the matching
-  // comment in resolveCellConfig.
-  const rowEnv = row.envelopeOverride ? row.envelope : undefined;
-  const columnEnv = column.envelopeOverride ? column.envelope : undefined;
-  const primary = precedence === "row" ? rowEnv : columnEnv;
-  const secondary = precedence === "row" ? columnEnv : rowEnv;
-  return primary ?? secondary ?? builtIn;
+  const rowWins = precedence === "row";
+  const winner = rowWins ? row : column;
+  const loser = rowWins ? column : row;
+  return loser.envelopeOverride ? loser.envelope : winner.envelope;
 }
 
 export function resolveCellConfig(
@@ -334,74 +367,46 @@ export function resolveCellConfig(
   row: RowConfig,
   column: ColumnConfig,
   precedence: Precedence,
-  builtIns: BuiltInDefaults,
   /** The row's trigger mode derives a gate from the *current* step length
    * (see triggerModeGate) -- a runtime value, not part of RowConfig's
    * static shape, so the caller computes and passes it in rather than this
-   * module reaching for stepSeconds itself. */
+   * module reaching for stepSeconds itself. Always a concrete number
+   * (never undefined) -- see gate's own handling below for why that
+   * makes it exempt from the row/column precedence race entirely. */
   rowDefaultGate: number,
 ): ResolvedCellConfig {
-  // A row/column only contributes a field's default when its own
-  // Override is on -- precedence is purely a tie-breaker for when *both*
-  // sides contribute the same field (see pick() below), not a way for
-  // one side to win unconditionally regardless of its own override
-  // state. A row/column that's never touched its defaults (or has
-  // explicitly turned its override off) shouldn't silently block the
-  // other side from taking effect just because it happens to hold global
-  // precedence -- that would make the *other* side's own Override toggle
-  // permanently inert, which is exactly the bug this cascade must avoid.
-  const rowDefaultNote = row.defaultsOverride ? row.defaultNote : undefined;
-  // Its own separate toggle, not row.defaultsOverride -- see
-  // RowConfig.defaultGainOverride's own doc for why gain split off from
-  // the note/shift pair.
-  const rowDefaultGain = row.defaultGainOverride ? row.defaultGain : undefined;
-  const rowDefaultShift = row.defaultsOverride
-    ? row.defaultTimeShiftSeconds
-    : undefined;
-  const columnDefaultNote = column.defaultsOverride
-    ? column.defaultNote
-    : undefined;
-  const columnDefaultGain = column.defaultsOverride
-    ? column.defaultGain
-    : undefined;
-  const columnDefaultGate = column.defaultsOverride
-    ? column.defaultGate
-    : undefined;
-  const columnDefaultShift = column.defaultsOverride
-    ? column.defaultTimeShiftSeconds
-    : undefined;
-
+  const rowWins = precedence === "row";
   return {
     fires: cell.on && row.enabled && column.enabled,
-    note: pick(
+    note: pickByPrecedence(
       cell.note,
-      rowDefaultNote,
-      columnDefaultNote,
-      precedence,
-      builtIns.note,
+      rowWins ? row.defaultNote : column.defaultNote,
+      rowWins ? column.defaultNote : row.defaultNote,
+      rowWins ? column.defaultsOverride : row.defaultsOverride,
     ),
-    gain: pick(
+    // defaultGain's own loser-side flag differs by which side is
+    // losing -- row.defaultGainOverride is its own separate toggle (see
+    // RowConfig's own doc for why), column has no equivalent split, its
+    // shared defaultsOverride covers gain too.
+    gain: pickByPrecedence(
       cell.gain,
-      rowDefaultGain,
-      columnDefaultGain,
-      precedence,
-      builtIns.gain,
+      rowWins ? row.defaultGain : column.defaultGain,
+      rowWins ? column.defaultGain : row.defaultGain,
+      rowWins ? column.defaultsOverride : row.defaultGainOverride,
     ),
-    gate: pick(
-      cell.gate,
-      rowDefaultGate,
-      columnDefaultGate,
-      precedence,
-      builtIns.gate,
-    ),
-    timeShiftSeconds: pick(
+    // Not a precedence race at all -- row has no gate concept to
+    // compete with column's (a row's own gate always comes from its
+    // trigger mode, not a settable default), so column's own
+    // defaultGateOverride is the only thing that ever matters here,
+    // independent of the global precedence setting entirely.
+    gate: cell.gate ?? (column.defaultGateOverride ? column.defaultGate : rowDefaultGate),
+    timeShiftSeconds: pickByPrecedence(
       cell.timeShiftSeconds,
-      rowDefaultShift,
-      columnDefaultShift,
-      precedence,
-      builtIns.timeShiftSeconds,
+      rowWins ? row.defaultTimeShiftSeconds : column.defaultTimeShiftSeconds,
+      rowWins ? column.defaultTimeShiftSeconds : row.defaultTimeShiftSeconds,
+      rowWins ? column.defaultsOverride : row.defaultsOverride,
     ),
-    envelope: pickEnvelope(cell, row, column, precedence, builtIns.envelope),
+    envelope: pickEnvelope(cell, row, column, precedence),
     effects: cell.effectsOverride ? cell.effects : row.effects,
   };
 }

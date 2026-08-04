@@ -241,14 +241,16 @@ make run-image-backend
   instantiation time (1 for every type except delay, which defaults to
   0.35 — see the next bullet) and is now user-adjustable like everything
   else.
-- **Row/column precedence** dropdown (top bar): a row or column only
-  contributes a Defaults/Envelope field when its own **Override** button
-  is switched on; this dropdown is purely the tie-breaker for when *both*
-  a row and a column have their Override on for the same field. If only
-  one side is overriding, that side wins outright regardless of this
-  setting — precedence never lets one side win unconditionally just for
-  holding it, since that would make the *other* side's Override button
-  pointless. Both buttons are always clickable; neither is ever disabled.
+- **Row/column precedence** dropdown (top bar, defaults to "Row wins"):
+  whichever side it favors contributes its Defaults/Envelope fields
+  *unconditionally* — that side's own **Override** button shows as on and
+  disabled there, since toggling it can't change an outcome it already
+  controls. The *other* (losing) side's Override button stays fully
+  interactive: switching it on lets that side's own values win instead,
+  overriding the precedence setting for just that row or column. Default
+  gate is the one exception — a row has no gate default of its own to
+  compete with a column's, so a column's own gate Override is always
+  live regardless of this dropdown, never disabled.
 - **Key / Scale** dropdowns (top bar): a global constraint above the
   cell/row/column note cascade, not part of it — whatever note a cell
   resolves to (default 60/middle C unless a row, column, or cell sets its

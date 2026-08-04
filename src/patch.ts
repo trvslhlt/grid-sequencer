@@ -56,6 +56,7 @@ export function serializePatch(
       defaultGain: row.config.defaultGain,
       defaultGainOverride: row.config.defaultGainOverride,
       defaultTimeShiftSeconds: row.config.defaultTimeShiftSeconds,
+      probability: row.config.probability,
       envelopeOverride: row.config.envelopeOverride,
       envelope: row.config.envelope,
       effects: row.config.effects,
@@ -158,6 +159,7 @@ export async function duplicateRow(
     defaultGain: sourceRow.config.defaultGain,
     defaultGainOverride: sourceRow.config.defaultGainOverride,
     defaultTimeShiftSeconds: sourceRow.config.defaultTimeShiftSeconds,
+    probability: sourceRow.config.probability,
     envelopeOverride: sourceRow.config.envelopeOverride,
     envelope: structuredClone(sourceRow.config.envelope),
     effects: structuredClone(sourceRow.config.effects),
@@ -201,6 +203,7 @@ async function addPatchRow(
   model.setRowDefaultGain(row, patchRow.defaultGain);
   if (patchRow.defaultGainOverride) model.setRowDefaultGainOverride(row, true);
   model.setRowDefaultTimeShift(row, patchRow.defaultTimeShiftSeconds);
+  model.setRowProbability(row, patchRow.probability ?? 1);
   if (patchRow.envelopeOverride) model.setRowEnvelopeOverride(row, true);
   model.setRowEnvelope(row, (patchRow.envelope as EnvelopeParams).points);
   model.setRowEffects(row, patchRow.effects as EffectSpec[]);

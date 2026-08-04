@@ -20,6 +20,10 @@ export interface PatchRow {
    * have no such key at all; addPatchRow falls back to `false`. */
   defaultGainOverride?: boolean;
   defaultTimeShiftSeconds: number;
+  /** Optional, not required -- patches saved before this field existed
+   * have no such key at all; addPatchRow falls back to `1` (always
+   * fires, the same default a freshly-added row already gets). */
+  probability?: number;
   envelopeOverride: boolean;
   envelope: unknown;
   effects: unknown[];
