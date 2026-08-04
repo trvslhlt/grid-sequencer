@@ -1973,6 +1973,18 @@ function openInstrumentModal(
 
   const footer = document.createElement("div");
   footer.className = "modal-footer";
+  // Leftmost -- "try it" reads before "commit it", same left-to-right
+  // ordering as patchModal's own New/Load/Save. Fires one voice with
+  // whatever's currently set (source params, envelope, effects) right
+  // now, independent of the sequencer -- see GridModel.previewRow's own
+  // doc for why it always fires regardless of this row's mute/solo state.
+  const previewButton = document.createElement("button");
+  previewButton.textContent = "Preview";
+  previewButton.addEventListener("click", () => {
+    const current = model.getRow(row.id);
+    if (current) model.previewRow(current);
+  });
+  footer.appendChild(previewButton);
   const savePresetButton = document.createElement("button");
   savePresetButton.textContent = "Save as instrument preset…";
   savePresetButton.addEventListener("click", () => {
@@ -2433,10 +2445,17 @@ export function createGridView(
     // gain fallback) lives behind this button instead of cluttering the
     // main panel -- see openInstrumentModal's own doc. Labeled with the
     // row's own source type so it reads as "configure the instrument,"
-    // not a generic settings button.
+    // not a generic settings button -- plus the current sample name for
+    // samplePlayer rows, since otherwise there's no way to tell whether
+    // one's actually assigned without opening the popup.
+    const instrumentLabel = row.source.needsSample
+      ? options.getCurrentSampleName?.(row)
+      : undefined;
     fields.push({
       key: "openInstrument",
-      label: `${SOURCE_TYPE_LABELS[row.config.sourceType]}…`,
+      label: instrumentLabel
+        ? `${SOURCE_TYPE_LABELS[row.config.sourceType]}: ${instrumentLabel}…`
+        : `${SOURCE_TYPE_LABELS[row.config.sourceType]}…`,
       kind: "button",
       onClick: () => {
         // Not the `row` param directly -- same staleness reasoning as

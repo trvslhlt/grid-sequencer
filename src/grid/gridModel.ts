@@ -768,6 +768,29 @@ export class GridModel {
     );
   }
 
+  /** Fires one voice on `row` right now, using its own row-level defaults
+   * -- the Instrument popup's "Preview" button (see gridView.ts), for
+   * auditioning a source/envelope/effects change without needing the
+   * sequencer running or a cell to actually be on. Always fires
+   * regardless of this row's own mute/solo state (previewing an
+   * instrument shouldn't require unmuting the row first) and never
+   * triggers this row's own outbound duck/callResponse relationships --
+   * those are consequences of the sequencer actually firing a step, not
+   * of a manual audition. A small lookahead (see bruit-kit's own
+   * scheduling convention) rather than audioContext.currentTime exactly,
+   * so the browser has a moment to schedule before the note's own start
+   * time arrives. */
+  previewRow(row: Row): void {
+    const runtime = this.findRuntime(row);
+    if (!runtime) return;
+    const atTime = this.audioContext.currentTime + 0.02;
+    const { note, resolved, gateSeconds } = this.resolveRowVoice(
+      runtime,
+      this.stepSeconds,
+    );
+    this.fireVoice(runtime, note, resolved, atTime, gateSeconds);
+  }
+
   private findRuntime(row: Row): RowRuntime | undefined {
     return this.rows.find((r) => r.id === row.id);
   }
@@ -1011,6 +1034,36 @@ export class GridModel {
     runtime.source.target.noteOff(note, atTime + gateSeconds);
   }
 
+  /** Resolves what `runtime` itself would sound like on an always-on,
+   * unoverridden synthetic cell/column -- i.e. its own row-level
+   * defaults, exactly as if it had fired an empty cell of its own. Shared
+   * by triggerCallResponse (which fires this resolution on a *different*
+   * row than the one that actually triggered it) and previewRow (which
+   * fires it on demand, outside the sequencer entirely) -- both need the
+   * identical note/gain/envelope/gate resolution, just anchored at
+   * different times for different reasons. */
+  private resolveRowVoice(
+    runtime: RowRuntime,
+    stepSeconds: number,
+  ): { note: number; resolved: ResolvedCellConfig; gateSeconds: number } {
+    const rowDefaultGate = triggerModeGate(runtime.config.triggerMode);
+    const resolved = resolveCellConfig(
+      { ...createCellConfig(), on: true },
+      runtime.config,
+      createColumnConfig(),
+      this.precedence,
+      BUILT_INS,
+      rowDefaultGate,
+    );
+    const note =
+      runtime.config.sourceType === "samplePlayer" &&
+      runtime.config.playbackMode === "direct"
+        ? runtime.config.defaultNote
+        : quantizeToScale(resolved.note, this.scaleRoot, this.scaleType);
+    const gateSeconds = stepSeconds * resolved.gate;
+    return { note, resolved, gateSeconds };
+  }
+
   /** Rolls RowConfig.callResponse's probability for `runtime` (already
    * confirmed to have actually fired this tick -- see fireTick's own
    * duck-scheduling call right above this one, which this mirrors) and,
@@ -1050,21 +1103,10 @@ export class GridModel {
     if (!target.active || !target.config.enabled) return;
     if (soloActive && !target.solo) return;
 
-    const rowDefaultGate = triggerModeGate(target.config.triggerMode);
-    const resolved = resolveCellConfig(
-      { ...createCellConfig(), on: true },
-      target.config,
-      createColumnConfig(),
-      this.precedence,
-      BUILT_INS,
-      rowDefaultGate,
+    const { note, resolved, gateSeconds } = this.resolveRowVoice(
+      target,
+      stepSeconds,
     );
-    const note =
-      target.config.sourceType === "samplePlayer" &&
-      target.config.playbackMode === "direct"
-        ? target.config.defaultNote
-        : quantizeToScale(resolved.note, this.scaleRoot, this.scaleType);
-    const gateSeconds = stepSeconds * resolved.gate;
     const responseAtTime = atTime + Math.max(callResponse.delaySeconds, 0);
     this.fireVoice(target, note, resolved, responseAtTime, gateSeconds);
 
