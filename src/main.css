@@ -1,14 +1,94 @@
+:root {
+  /* Warm, hazy neutrals -- a dim room rather than a corporate dark-mode
+   * black. Every grey below carries a touch of plum/brown instead of
+   * being a true desaturated grey. */
+  --bg: #17151a;
+  --bg-raised: #201d24;
+  --bg-inset: #2a2530;
+  --bg-inset-hover: #342e3b;
+  --border: #382f3f;
+  --border-soft: #2b2530;
+  --text: #ece6e8;
+  --text-muted: #a89ba8;
+  --text-faint: #726578;
+
+  /* Three accents, each with one job, borrowed loosely from a hazy
+   * photograph plus a scattering of colored thread -- muted rather than
+   * saturated-corporate, and never mixed within one element. */
+  --accent-teal: #6fc8bd; /* active/on, interactive default */
+  --accent-teal-dim: #3f7d76;
+  --accent-rose: #e08fae; /* selection/focus */
+  --accent-amber: #e3a75e; /* titles, playhead, "differs from default" */
+  --accent-go: #5fa878; /* transport: playing state off */
+  --accent-stop: #d97878; /* transport: playing state on */
+  --accent-danger: #e2707a;
+
+  --radius: 7px;
+  --radius-sm: 5px;
+  --shadow-panel: 0 1px 2px rgba(0, 0, 0, 0.25), 0 8px 24px rgba(0, 0, 0, 0.2);
+  --shadow-modal: 0 4px 8px rgba(0, 0, 0, 0.3), 0 24px 64px rgba(0, 0, 0, 0.4);
+}
+
+* {
+  box-sizing: border-box;
+}
+
 body {
-  font-family: system-ui, sans-serif;
-  background: #16171b;
-  color: #e4e6eb;
+  font-family:
+    ui-monospace,
+    "SF Mono",
+    "Cascadia Code",
+    "Roboto Mono",
+    Menlo,
+    Consolas,
+    monospace;
+  background: var(--bg);
+  background-image: radial-gradient(
+      ellipse 900px 500px at 8% -10%,
+      rgba(111, 200, 189, 0.05),
+      transparent 60%
+    ),
+    radial-gradient(
+      ellipse 700px 500px at 96% 8%,
+      rgba(224, 143, 174, 0.05),
+      transparent 55%
+    );
+  background-attachment: fixed;
+  color: var(--text);
   padding: 1.5rem;
   max-width: 1560px;
   margin: 0 auto;
+  text-transform: lowercase;
+}
+
+/* Buttons don't reliably inherit text-transform from body in every
+ * browser (the UA stylesheet resets it) -- set explicitly rather than
+ * relying on inheritance. Only buttons: inputs/selects are excluded below
+ * since their content is often a name the user typed or chose, not this
+ * app's own copy. */
+button {
+  text-transform: lowercase;
+}
+
+/* Anything that can hold a name someone typed or picked -- a row/sample/
+ * patch/preset name, a value being edited -- keeps its original case.
+ * Everything else (buttons, static labels/headings/hints) is this app's
+ * own copy and gets lowercased above/via body. */
+input,
+select,
+textarea,
+.row-master-name,
+.panel-title,
+.modal-title,
+.management-row .name,
+.library-tree-item button,
+#patch-button,
+.preserve-case {
+  text-transform: none;
 }
 
 .note {
-  color: #9aa0ac;
+  color: var(--text-muted);
   font-size: 0.9rem;
 }
 
@@ -17,7 +97,7 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
-  margin-bottom: 1rem;
+  margin-bottom: 1.25rem;
 }
 
 .app-header-left {
@@ -28,6 +108,10 @@ body {
 
 .app-header h1 {
   margin: 0;
+  font-size: 1.4rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--text);
 }
 
 /* Unsaved changes (see main.ts's isDirty/markSaved) -- treated like an
@@ -35,8 +119,8 @@ body {
  * label itself so the signal isn't color-only, and a native
  * beforeunload warning if you try to navigate away with this showing. */
 .patch-button-dirty {
-  box-shadow: 0 0 0 2px #ffb454;
-  border-color: #ffb454;
+  box-shadow: 0 0 0 2px var(--accent-amber);
+  border-color: var(--accent-amber);
 }
 
 /* Green + play glyph when stopped (click starts), red + stop glyph while
@@ -52,11 +136,12 @@ body {
   justify-content: center;
   font-size: 1.1rem;
   line-height: 1;
-  color: #fff;
-  background: #2ea043;
+  color: #16151a;
+  background: var(--accent-go);
   border: none;
   padding: 0;
   cursor: pointer;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.2), 0 2px 10px rgba(95, 168, 120, 0.35);
 }
 
 .play-stop-button:hover:not(:disabled) {
@@ -66,20 +151,29 @@ body {
 .play-stop-button:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+  box-shadow: none;
 }
 
 .play-stop-button.is-playing {
-  background: #e5484d;
+  background: var(--accent-stop);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.2), 0 2px 10px rgba(217, 120, 120, 0.4);
 }
 
-/* !important: elements toggled by this class often also carry their own
- * id/class display rule (e.g. #library-management-view's display: flex,
- * .sequencer-transport's display: flex) -- without it, a same-or-higher
- * specificity rule declared later in this file (or an id selector, which
- * always outranks a class) would win the cascade and the element would
- * stay visibly laid out despite having "hidden" applied. */
 .hidden {
   display: none !important;
+}
+
+/* Icon-only buttons (see main.ts's manage-library-button toggle) -- square
+ * rather than text-button-shaped, the SVG centered with no extra padding
+ * eating into it. */
+.icon-button {
+  flex-shrink: 0;
+  width: 2.25rem;
+  height: 2.25rem;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .transport {
@@ -98,16 +192,28 @@ body {
 }
 
 button {
-  background: #2a2d34;
-  color: #e4e6eb;
-  border: 1px solid #3a3e47;
-  border-radius: 4px;
+  background: var(--bg-inset);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
   padding: 0.4rem 0.8rem;
+  font: inherit;
   cursor: pointer;
+  transition:
+    background 0.12s,
+    border-color 0.12s;
 }
 
-button:hover {
-  background: #3a3e47;
+button:hover:not(:disabled) {
+  background: var(--bg-inset-hover);
+  border-color: #4a3f52;
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--accent-teal-dim);
+  outline-offset: 1px;
 }
 
 button:disabled {
@@ -116,21 +222,100 @@ button:disabled {
 }
 
 button:disabled:hover {
-  background: #2a2d34;
+  background: var(--bg-inset);
 }
 
 select,
 input[type="text"],
 input[type="number"] {
-  background: #2a2d34;
-  color: #e4e6eb;
-  border: 1px solid #3a3e47;
-  border-radius: 4px;
-  padding: 0.2rem 0.4rem;
+  background: var(--bg-inset);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.25rem 0.45rem;
+  font: inherit;
+}
+
+select {
+  appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, var(--text-muted) 50%),
+    linear-gradient(135deg, var(--text-muted) 50%, transparent 50%);
+  background-position:
+    calc(100% - 14px) center,
+    calc(100% - 9px) center;
+  background-size:
+    5px 5px,
+    5px 5px;
+  background-repeat: no-repeat;
+  padding-right: 1.6rem;
 }
 
 input:disabled {
   opacity: 0.4;
+}
+
+input[type="checkbox"] {
+  appearance: none;
+  width: 15px;
+  height: 15px;
+  flex: none;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-inset);
+  cursor: pointer;
+  position: relative;
+  vertical-align: middle;
+}
+
+input[type="checkbox"]:checked {
+  background: var(--accent-teal-dim);
+  border-color: var(--accent-teal);
+}
+
+input[type="checkbox"]:checked::after {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 1px;
+  width: 4px;
+  height: 8px;
+  border: solid #10201d;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+input[type="range"] {
+  appearance: none;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--bg-inset);
+  cursor: pointer;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  appearance: none;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: var(--accent-teal);
+  border: 2px solid #16151a;
+  box-shadow: 0 0 0 1px var(--accent-teal-dim);
+  cursor: pointer;
+}
+
+input[type="range"]::-moz-range-thumb {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: var(--accent-teal);
+  border: 2px solid #16151a;
+  box-shadow: 0 0 0 1px var(--accent-teal-dim);
+  cursor: pointer;
+}
+
+input[type="range"]:disabled::-webkit-slider-thumb {
+  background: var(--text-faint);
+  box-shadow: none;
 }
 
 /* Grid-table cell (see gridView.ts's render()), not a separate form --
@@ -140,14 +325,14 @@ input:disabled {
 .add-row-cell {
   cursor: pointer;
   border-style: dashed;
-  color: #6a6f7a;
+  color: var(--text-faint);
   font-size: 1.1rem;
   font-weight: 600;
 }
 
 .add-row-cell:hover {
-  color: #e4e6eb;
-  border-color: #4c7dff;
+  color: var(--text);
+  border-color: var(--accent-rose);
 }
 
 .patch-controls {
@@ -158,7 +343,7 @@ input:disabled {
 }
 
 .status-text {
-  color: #9aa0ac;
+  color: var(--text-muted);
   font-size: 0.85rem;
 }
 
@@ -194,14 +379,14 @@ input:disabled {
   justify-content: space-between;
   gap: 0.5rem;
   margin-bottom: 0.6rem;
-  border-bottom: 1px solid #2a2d34;
+  border-bottom: 1px solid var(--border-soft);
   padding-bottom: 0.5rem;
 }
 
 .library-panel-title {
   font-weight: 600;
   font-size: 0.9rem;
-  color: #ffb454;
+  color: var(--accent-amber);
 }
 
 .grid-layout {
@@ -226,21 +411,22 @@ input:disabled {
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  border-radius: 4px;
-  background: #33384a;
-  color: #e4e6eb;
-  border: 1px solid #454b60;
+  border-radius: var(--radius-sm);
+  background: var(--bg-inset);
+  color: var(--text);
+  border: 1px solid var(--border);
   font-size: 0.75rem;
   user-select: none;
   padding: 0 0.4rem;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  transition: background 0.12s;
 }
 
 .master-cell.off {
-  background: #2a2d34;
-  color: #6a6f7a;
+  background: var(--bg-raised);
+  color: var(--text-faint);
   text-decoration: line-through;
 }
 
@@ -252,7 +438,7 @@ input:disabled {
 }
 
 .master-cell.selected {
-  box-shadow: 0 0 0 2px #4c7dff;
+  box-shadow: 0 0 0 2px var(--accent-rose);
 }
 
 .row-master {
@@ -273,9 +459,9 @@ input:disabled {
   height: 18px;
   padding: 0;
   border-radius: 3px;
-  border: 1px solid #454b60;
-  background: #23262f;
-  color: #6a6f7a;
+  border: 1px solid var(--border);
+  background: var(--bg-raised);
+  color: var(--text-faint);
   font-size: 0.65rem;
   font-weight: 700;
   line-height: 1;
@@ -283,9 +469,9 @@ input:disabled {
 }
 
 .solo-button.active {
-  background: #e6c34a;
-  border-color: #e6c34a;
-  color: #1a1c22;
+  background: var(--accent-amber);
+  border-color: var(--accent-amber);
+  color: #1a1508;
 }
 
 .cell {
@@ -295,42 +481,52 @@ input:disabled {
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  border-radius: 4px;
-  background: #2a2d34;
-  color: #e4e6eb;
-  border: 1px solid #3a3e47;
+  border-radius: var(--radius-sm);
+  background: var(--bg-inset);
+  color: var(--text);
+  border: 1px solid var(--border);
   font-size: 0.8rem;
   user-select: none;
+  transition:
+    background 0.12s,
+    box-shadow 0.12s;
+}
+
+.cell:hover {
+  border-color: #4a3f52;
 }
 
 .cell.on {
-  background: #4c7dff;
+  background: var(--accent-teal-dim);
+  border-color: var(--accent-teal);
+  box-shadow: 0 0 10px rgba(111, 200, 189, 0.25);
 }
 
 .cell.overridden {
-  border-color: #ffb454;
+  border-color: var(--accent-amber);
 }
 
 .cell.selected {
-  box-shadow: 0 0 0 2px #4c7dff;
+  box-shadow: 0 0 0 2px var(--accent-rose);
 }
 
 .cell.playhead {
-  box-shadow: 0 0 0 2px #ffb454;
+  box-shadow: 0 0 0 2px var(--accent-amber);
 }
 
 .cell.selected.playhead {
-  box-shadow: 0 0 0 2px #4c7dff, 0 0 0 4px #ffb454;
+  box-shadow: 0 0 0 2px var(--accent-rose), 0 0 0 4px var(--accent-amber);
 }
 
 .config-panel {
   flex: 1;
   min-width: 280px;
   max-width: 360px;
-  background: #1c1e24;
-  border: 1px solid #2a2d34;
-  border-radius: 6px;
-  padding: 0.85rem;
+  background: var(--bg-raised);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  padding: 0.9rem;
+  box-shadow: var(--shadow-panel);
 }
 
 .panel-title-row {
@@ -339,14 +535,14 @@ input:disabled {
   justify-content: space-between;
   gap: 0.5rem;
   margin-bottom: 0.6rem;
-  border-bottom: 1px solid #2a2d34;
+  border-bottom: 1px solid var(--border-soft);
   padding-bottom: 0.5rem;
 }
 
 .panel-title {
   font-weight: 600;
   font-size: 0.9rem;
-  color: #ffb454;
+  color: var(--accent-amber);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -366,23 +562,24 @@ input:disabled {
   flex: none;
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   padding: 0.1rem 0.35rem;
   font-size: 0.9rem;
   line-height: 1;
   cursor: pointer;
-  color: #8a8f9a;
+  color: var(--text-muted);
 }
 
 .panel-title-icon-button:hover {
-  color: #e4e6eb;
-  border-color: #454b60;
+  color: var(--text);
+  border-color: var(--border);
+  background: var(--bg-inset);
 }
 
 /* Destructive -- red hover instead of the neutral one above. */
 .panel-title-remove-button:hover {
-  color: #ff6b6b;
-  border-color: #ff6b6b;
+  color: var(--accent-danger);
+  border-color: var(--accent-danger);
 }
 
 .panel-header-button {
@@ -392,13 +589,13 @@ input:disabled {
 }
 
 .panel-header-button.active {
-  background: #4c7dff;
-  border-color: #4c7dff;
-  color: #fff;
+  background: var(--accent-teal-dim);
+  border-color: var(--accent-teal);
+  color: var(--text);
 }
 
 .panel-hint {
-  color: #6a6f7a;
+  color: var(--text-faint);
   font-size: 0.85rem;
 }
 
@@ -411,7 +608,7 @@ input:disabled {
 .panel-section {
   margin-top: 0.6rem;
   padding-top: 0.6rem;
-  border-top: 1px solid #2a2d34;
+  border-top: 1px solid var(--border-soft);
 }
 
 .panel-section-title-row {
@@ -425,7 +622,7 @@ input:disabled {
 .panel-section-title {
   font-weight: 600;
   font-size: 0.8rem;
-  color: #9aa0ac;
+  color: var(--text-muted);
 }
 
 .dimmed-section {
@@ -461,14 +658,14 @@ input:disabled {
 }
 
 .field-label-clickable:hover {
-  color: #ffb454;
+  color: var(--accent-amber);
 }
 
 /* Persistent, not just on hover -- signals "this control already has a
  * non-default range set," same accent color as .cell.overridden uses
  * elsewhere in this app for "differs from default." */
 .field-label-clickable.field-label-customized {
-  color: #ffb454;
+  color: var(--accent-amber);
 }
 
 /* Signals "this param is currently drifting" (see gridView.ts's drift
@@ -487,10 +684,10 @@ input:disabled {
 @keyframes drift-label-pulse {
   0%,
   100% {
-    color: #7fe0c4;
+    color: var(--accent-teal);
   }
   50% {
-    color: #3a9b7d;
+    color: var(--accent-teal-dim);
   }
 }
 
@@ -553,14 +750,14 @@ input:disabled {
 
 .field-value {
   font-variant-numeric: tabular-nums;
-  color: #9aa0ac;
+  color: var(--text-muted);
   font-size: 0.75rem;
   min-width: 2.5em;
   text-align: right;
 }
 
 .library-tree-empty {
-  color: #6a6f7a;
+  color: var(--text-faint);
   font-size: 0.85rem;
 }
 
@@ -572,7 +769,7 @@ input:disabled {
   cursor: pointer;
   font-size: 0.8rem;
   font-weight: 600;
-  color: #9aa0ac;
+  color: var(--text-muted);
   padding: 0.25rem 0;
   user-select: none;
 }
@@ -608,7 +805,7 @@ input:disabled {
 }
 
 .library-hint {
-  color: #6a6f7a;
+  color: var(--text-faint);
   font-size: 0.8rem;
   margin-top: 0.4rem;
 }
@@ -623,10 +820,11 @@ input:disabled {
 .management-section {
   flex: 1;
   min-width: 0;
-  background: #1c1e24;
-  border: 1px solid #2a2d34;
-  border-radius: 6px;
-  padding: 0.85rem;
+  background: var(--bg-raised);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  padding: 0.9rem;
+  box-shadow: var(--shadow-panel);
 }
 
 .management-section-header {
@@ -640,6 +838,7 @@ input:disabled {
 .management-section h2 {
   font-size: 1rem;
   margin: 0 0 0.6rem;
+  color: var(--accent-amber);
 }
 
 .management-row {
@@ -647,7 +846,7 @@ input:disabled {
   align-items: center;
   gap: 0.5rem;
   padding: 0.4rem 0;
-  border-bottom: 1px solid #2a2d34;
+  border-bottom: 1px solid var(--border-soft);
   font-size: 0.85rem;
 }
 
@@ -670,7 +869,7 @@ input:disabled {
 .preset-editor {
   margin-top: 0.5rem;
   padding-top: 0.5rem;
-  border-top: 1px solid #2a2d34;
+  border-top: 1px solid var(--border-soft);
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
@@ -679,7 +878,7 @@ input:disabled {
 .modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(10, 11, 13, 0.7);
+  background: rgba(12, 10, 14, 0.7);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -688,9 +887,9 @@ input:disabled {
 }
 
 .modal {
-  background: #1c1e24;
-  border: 1px solid #3a3e47;
-  border-radius: 8px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 10px;
   padding: 1rem;
   width: 100%;
   max-width: 620px;
@@ -699,6 +898,7 @@ input:disabled {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+  box-shadow: var(--shadow-modal);
 }
 
 /* A small popup (just min/max for one param, see gridView.ts's
@@ -719,14 +919,14 @@ input:disabled {
   align-items: center;
   justify-content: space-between;
   gap: 0.5rem;
-  border-bottom: 1px solid #2a2d34;
+  border-bottom: 1px solid var(--border-soft);
   padding-bottom: 0.5rem;
 }
 
 .modal-title {
   font-weight: 600;
   font-size: 1rem;
-  color: #ffb454;
+  color: var(--accent-amber);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -748,7 +948,7 @@ input:disabled {
   display: flex;
   justify-content: flex-end;
   gap: 0.5rem;
-  border-top: 1px solid #2a2d34;
+  border-top: 1px solid var(--border-soft);
   padding-top: 0.75rem;
 }
 
@@ -766,4 +966,39 @@ input:disabled {
   align-items: center;
   gap: 1rem;
   font-size: 0.85rem;
+}
+
+/* bruit-kit's own waveform/envelope widgets (imported as separate CSS in
+ * main.ts) ship with their own hardcoded blue/orange -- overridden here
+ * rather than edited at the source, since that library is shared beyond
+ * this app. The ".modal" ancestor gives these enough specificity to win
+ * regardless of which stylesheet the bundler happens to inject last. */
+.modal .waveform-range-svg,
+.modal .automation-svg {
+  background: var(--bg-inset);
+}
+
+.modal .waveform-range-line {
+  fill: var(--accent-teal);
+}
+
+.modal .waveform-range-dim {
+  fill: var(--bg);
+}
+
+.modal .waveform-range-handle {
+  stroke: var(--accent-amber);
+}
+
+.modal .automation-line {
+  stroke: var(--accent-teal);
+}
+
+.modal .automation-handle {
+  fill: var(--accent-teal);
+  stroke: var(--bg);
+}
+
+.modal .automation-handle-anchor {
+  fill: var(--accent-amber);
 }

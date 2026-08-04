@@ -2465,6 +2465,7 @@ export function createGridView(
         ? `${SOURCE_TYPE_LABELS[row.config.sourceType]}: ${instrumentLabel}…`
         : `${SOURCE_TYPE_LABELS[row.config.sourceType]}…`,
       kind: "button",
+      preserveCase: true,
       onClick: () => {
         // Not the `row` param directly -- same staleness reasoning as
         // onDuplicate below (a continuous control edited just before this

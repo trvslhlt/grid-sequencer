@@ -99,7 +99,16 @@ export type Field =
       readOnly?: boolean;
       onChange: (value: string) => void;
     }
-  | { key: string; label: string; kind: "button"; onClick: () => void }
+  | {
+      key: string;
+      label: string;
+      kind: "button";
+      onClick: () => void;
+      /** The label embeds a user-given name (e.g. rowPanel's own
+       * "Sample player: <sample name>…") -- keeps that name's case intact
+       * against the app-wide lowercase styling instead of mangling it. */
+      preserveCase?: boolean;
+    }
   | {
       key: string;
       label: string;
@@ -210,6 +219,7 @@ function renderField(container: HTMLElement, field: Field): void {
   if (field.kind === "button") {
     const button = document.createElement("button");
     button.textContent = field.label;
+    if (field.preserveCase) button.classList.add("preserve-case");
     button.addEventListener("click", field.onClick);
     row.appendChild(button);
     container.appendChild(row);

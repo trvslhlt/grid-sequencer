@@ -1211,6 +1211,13 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
 
   masterButtonEl.addEventListener("click", () => view.selectMaster());
 
+  // Open book = "go look at the library"; 3x3 grid = "go back to the
+  // sequencer grid" -- both drawn as inline SVG (rather than relying on a
+  // unicode glyph rendering consistently) so they match the weight/size of
+  // each other exactly.
+  const BOOK_ICON = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6.2c-1.5-1.2-3.5-1.8-6-1.8-.6 0-1 .4-1 1v12.6c0 .6.4 1 1 1 2.5 0 4.5.6 6 1.8 1.5-1.2 3.5-1.8 6-1.8.6 0 1-.4 1-1V5.4c0-.6-.4-1-1-1-2.5 0-4.5.6-6 1.8Z" /><path d="M12 6.2v13.6" /></svg>`;
+  const GRID_ICON = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="5" height="5" /><rect x="9.5" y="3" width="5" height="5" /><rect x="16" y="3" width="5" height="5" /><rect x="3" y="9.5" width="5" height="5" /><rect x="9.5" y="9.5" width="5" height="5" /><rect x="16" y="9.5" width="5" height="5" /><rect x="3" y="16" width="5" height="5" /><rect x="9.5" y="16" width="5" height="5" /><rect x="16" y="16" width="5" height="5" /></svg>`;
+
   manageLibraryButtonEl.addEventListener("click", () => {
     const showingManagement =
       !libraryManagementViewEl.classList.contains("hidden");
@@ -1218,12 +1225,16 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
       libraryManagementViewEl.classList.add("hidden");
       sequencerViewEl.classList.remove("hidden");
       sequencerTransportEl.classList.remove("hidden");
-      manageLibraryButtonEl.textContent = "Manage Library";
+      manageLibraryButtonEl.innerHTML = BOOK_ICON;
+      manageLibraryButtonEl.setAttribute("aria-label", "Manage Library");
+      manageLibraryButtonEl.title = "Manage Library";
     } else {
       sequencerViewEl.classList.add("hidden");
       sequencerTransportEl.classList.add("hidden");
       libraryManagementViewEl.classList.remove("hidden");
-      manageLibraryButtonEl.textContent = "Back to Sequencer";
+      manageLibraryButtonEl.innerHTML = GRID_ICON;
+      manageLibraryButtonEl.setAttribute("aria-label", "Back to Sequencer");
+      manageLibraryButtonEl.title = "Back to Sequencer";
       renderManagementPage();
     }
   });
