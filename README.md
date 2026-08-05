@@ -420,6 +420,16 @@ make run-image-backend
   saved patch from the dropdown and hit **Load** to replace the current
   grid with it (also confirmed first, since it's destructive to whatever
   you haven't saved).
+- **Undo/redo** (↶/↷ buttons next to **Patch…**, or Ctrl/Cmd+Z /
+  Ctrl/Cmd+Shift+Z): covers everything Patch persistence saves — cells,
+  rows, columns, master bus, tempo, which sample each row points at.
+  Checked on an interval against a snapshot history rather than hooked to
+  every individual edit, same reasoning as the unsaved-changes indicator
+  below it. Session-only — history resets on **Load** and on first
+  opening the app, same as most editors reset undo on File > Open, so
+  undoing never reaches back into a patch you've since navigated away
+  from. **New** stays undoable, since it only clears the current board
+  rather than switching to different saved content.
 
 ## Architecture
 

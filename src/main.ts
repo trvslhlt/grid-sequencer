@@ -15,9 +15,11 @@ import {
   type SourceType,
 } from "./grid/sourceFactory";
 import {
+  type PatchSnapshot,
   type TempoState,
   applyPatch,
   duplicateRow,
+  restoreSnapshot,
   serializePatch,
 } from "./patch";
 import {
@@ -123,6 +125,10 @@ const scaleSelectEl =
   document.querySelector<HTMLSelectElement>("#scale-select")!;
 const patchButtonEl =
   document.querySelector<HTMLButtonElement>("#patch-button")!;
+const undoButtonEl =
+  document.querySelector<HTMLButtonElement>("#undo-button")!;
+const redoButtonEl =
+  document.querySelector<HTMLButtonElement>("#redo-button")!;
 
 for (const subdivision of SUBDIVISIONS) {
   const option = document.createElement("option");
@@ -978,6 +984,110 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
     patchButtonEl.classList.toggle("patch-button-dirty", isDirty);
   }
 
+  // Undo/redo -- a history of the exact same full-snapshot string
+  // currentSnapshot() already produces for dirty-tracking above, not a
+  // per-field command log. Same reasoning as that doc: this app has
+  // dozens of mutation sites (many entirely internal to gridView.ts's own
+  // closure), so a snapshot comparison that can't miss one beats hooking
+  // every call site individually. Polled on its own faster interval
+  // (dirty-tracking's 1s is imperceptible for "is there unsaved work,"
+  // but undo wants to distinguish two separate edits made close together,
+  // not merge them into one step). Session-only, same as most editors'
+  // undo history resets on File > Open: resetUndoHistory() runs alongside
+  // every markSaved() call site below (initial load, Load, New), since
+  // undoing back into a patch you've since navigated away from would be
+  // more confusing than useful.
+  const UNDO_HISTORY_LIMIT = 100;
+  let undoStack: string[] = [];
+  let redoStack: string[] = [];
+  // Set only while performUndo/performRedo's own restoreSnapshot call is
+  // in flight, so the interval poll below doesn't see the state it just
+  // restored as a brand new edit and immediately push it back onto the
+  // stack it was popped from.
+  let isRestoringHistory = false;
+
+  function resetUndoHistory(): void {
+    undoStack = [currentSnapshot()];
+    redoStack = [];
+    updateUndoButtons();
+  }
+
+  function checkpointUndoHistory(): void {
+    if (isRestoringHistory) return;
+    const snapshot = currentSnapshot();
+    if (snapshot === undoStack[undoStack.length - 1]) return;
+    undoStack.push(snapshot);
+    if (undoStack.length > UNDO_HISTORY_LIMIT) undoStack.shift();
+    redoStack = [];
+    updateUndoButtons();
+  }
+
+  function updateUndoButtons(): void {
+    undoButtonEl.disabled = undoStack.length < 2;
+    redoButtonEl.disabled = redoStack.length === 0;
+  }
+
+  async function restoreHistoryEntry(snapshotJson: string): Promise<void> {
+    isRestoringHistory = true;
+    try {
+      const snapshot = JSON.parse(snapshotJson) as PatchSnapshot;
+      applyTempoState(
+        await restoreSnapshot(model, audioContext, snapshot, rowSampleIds),
+      );
+      syncTopBarFromModel();
+      view.render();
+      renderLibraryPanels();
+      updateDirtyState();
+    } finally {
+      isRestoringHistory = false;
+    }
+    updateUndoButtons();
+  }
+
+  // The isRestoringHistory guard here (not just inside restoreHistoryEntry)
+  // matters for reentrancy: a rapid double-click, or a held Cmd+Z's own key
+  // repeat, would otherwise fire this again while the first call's own
+  // restoreHistoryEntry is still awaiting restoreSnapshot -- two overlapping
+  // pop/push pairs against the same stacks would corrupt the history, not
+  // just double-apply a restore.
+  async function performUndo(): Promise<void> {
+    if (isRestoringHistory || undoStack.length < 2) return;
+    const current = undoStack.pop();
+    if (current === undefined) return;
+    redoStack.push(current);
+    await restoreHistoryEntry(undoStack[undoStack.length - 1]);
+  }
+
+  async function performRedo(): Promise<void> {
+    if (isRestoringHistory) return;
+    const next = redoStack.pop();
+    if (next === undefined) return;
+    undoStack.push(next);
+    await restoreHistoryEntry(next);
+  }
+
+  undoButtonEl.addEventListener("click", () => void performUndo());
+  redoButtonEl.addEventListener("click", () => void performRedo());
+
+  // Ctrl+Z / Cmd+Z (undo) and Shift+Ctrl+Z / Shift+Cmd+Z (redo) -- ignored
+  // while focus is in a text-editing control so this doesn't hijack that
+  // field's own native undo (e.g. mid-edit on a row's Name field).
+  window.addEventListener("keydown", (event) => {
+    if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "z") {
+      return;
+    }
+    const target = event.target;
+    if (
+      target instanceof HTMLInputElement ||
+      target instanceof HTMLTextAreaElement
+    ) {
+      return;
+    }
+    event.preventDefault();
+    if (event.shiftKey) void performRedo();
+    else void performUndo();
+  });
+
   // The "demo" patch is what loads by default -- seeded into the backend
   // exactly once, the first time this app ever runs against a fresh
   // backend (every later boot finds it already there and skips straight
@@ -1102,6 +1212,7 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
     currentPatchName = demo.name;
     markSaved();
   }
+  resetUndoHistory();
   await refreshAvailablePatches();
   await refreshAvailableSamples();
   await refreshInstrumentPresets();
@@ -1109,6 +1220,7 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
   view.render();
   renderLibraryPanels();
   patchButtonEl.disabled = false;
+  updateUndoButtons();
 
   // Polling, not a hook on every mutation -- see markSaved/updateDirtyState's
   // own doc for why. beforeunload is the browser-native "uncompleted
@@ -1116,6 +1228,9 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
   // ignoring whatever's assigned to returnValue -- every modern browser
   // does this deliberately, to stop sites spamming a custom message).
   setInterval(updateDirtyState, 1000);
+  // Faster than the dirty-check poll -- see checkpointUndoHistory's own
+  // doc for why undo wants finer granularity than "is there unsaved work."
+  setInterval(checkpointUndoHistory, 350);
   window.addEventListener("beforeunload", (event) => {
     if (!isDirty) return;
     event.preventDefault();
@@ -1163,6 +1278,7 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
         syncTopBarFromModel();
         currentPatchName = patchData.name;
         markSaved();
+        resetUndoHistory();
         view.render();
         renderLibraryPanels();
       },
