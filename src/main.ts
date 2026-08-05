@@ -84,6 +84,9 @@ const masterButtonEl =
 const moreLikeThisButtonEl = document.querySelector<HTMLButtonElement>(
   "#more-like-this-button",
 )!;
+const masterMeterFillEl = document.querySelector<HTMLDivElement>(
+  "#master-meter .master-meter-fill",
+)!;
 const manageLibraryButtonEl = document.querySelector<HTMLButtonElement>(
   "#manage-library-button",
 )!;
@@ -233,6 +236,46 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
   // captures precisely what's actually heard, downstream of every row's
   // effects and the master bus.
   const recorder = new Recorder(audioContext, limiter.output);
+
+  // Master level meter -- same tap point as Recorder, same reasoning
+  // ("what's actually heard", not the pre-limiter mix). A parallel
+  // connect() alongside limiter.output's existing link to
+  // audioContext.destination (see getSharedLimiter) -- Web Audio nodes
+  // fan out to any number of destinations, so this can't affect what's
+  // actually heard or recorded, just read it.
+  const meterAnalyser = audioContext.createAnalyser();
+  meterAnalyser.fftSize = 512;
+  limiter.output.connect(meterAnalyser);
+  const meterBuffer = new Float32Array(meterAnalyser.fftSize);
+  // dB range the meter's own width maps across -- -48dB (near-silent) at
+  // empty, 0dB (unity, right at the limiter's own ceiling territory) at
+  // full. Color bands (not the width mapping) are what actually signal
+  // "getting hot," so this doesn't need to match the limiter's own
+  // ceiling exactly.
+  const METER_MIN_DB = -48;
+  function updateMasterMeter(): void {
+    meterAnalyser.getFloatTimeDomainData(meterBuffer);
+    let peak = 0;
+    for (const sample of meterBuffer) {
+      const abs = Math.abs(sample);
+      if (abs > peak) peak = abs;
+    }
+    const db = peak > 0 ? 20 * Math.log10(peak) : Number.NEGATIVE_INFINITY;
+    const fraction = Math.min(
+      1,
+      Math.max(0, (db - METER_MIN_DB) / (0 - METER_MIN_DB)),
+    );
+    masterMeterFillEl.style.width = `${fraction * 100}%`;
+    masterMeterFillEl.style.background =
+      db >= -3
+        ? "var(--accent-danger)"
+        : db >= -12
+          ? "var(--accent-amber)"
+          : "var(--accent-teal-dim)";
+    requestAnimationFrame(updateMasterMeter);
+  }
+  requestAnimationFrame(updateMasterMeter);
+
   const model = new GridModel(
     audioContext,
     limiter.input,

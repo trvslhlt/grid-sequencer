@@ -3057,7 +3057,7 @@ export function createGridView(
       const rowSelected =
         selection?.kind === "row" && selection.rowId === row.id;
       const silencedBySolo = soloActive && !row.isSoloed();
-      rowMaster.className = `master-cell row-master${row.config.enabled ? "" : " off"}${silencedBySolo ? " solo-dimmed" : ""}${rowSelected ? " selected" : ""}`;
+      rowMaster.className = `master-cell row-master source-${row.config.sourceType}${row.config.enabled ? "" : " off"}${silencedBySolo ? " solo-dimmed" : ""}${rowSelected ? " selected" : ""}`;
       rowMaster.title = SOURCE_TYPE_LABELS[row.config.sourceType];
       rowMaster.addEventListener("click", () => {
         model.setRowEnabled(row, !row.config.enabled);

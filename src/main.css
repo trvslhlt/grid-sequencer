@@ -23,6 +23,16 @@
   --accent-stop: #d97878; /* transport: playing state on */
   --accent-danger: #e2707a;
 
+  /* Row color by source type (see gridView.ts's row-master `source-*`
+   * class) -- a separate small palette from the 3 semantic accents above,
+   * spread around hues those don't already use so a colored row can never
+   * be misread as e.g. the teal "active" cue bleeding outside the grid. */
+  --source-samplePlayer: #d98a6c;
+  --source-oscillatorSynth: #6fa8d6;
+  --source-fmSynth: #9c85d4;
+  --source-noiseGenerator: #9aa66a;
+  --source-granularSynth: #cf82c2;
+
   --radius: 7px;
   --radius-sm: 5px;
   --shadow-panel: 0 1px 2px rgba(0, 0, 0, 0.25), 0 8px 24px rgba(0, 0, 0, 0.2);
@@ -189,6 +199,29 @@ textarea,
   align-items: center;
   gap: 1.5rem;
   flex-wrap: wrap;
+}
+
+/* Master output level, post-limiter (see main.ts's analyser -- tapped off
+ * the exact same node Record does, "what's actually heard"). Always
+ * visible in the transport bar, not tucked behind opening the Master
+ * panel -- a meter you have to go looking for isn't much of a meter. */
+.master-meter {
+  position: relative;
+  width: 90px;
+  height: 1.5rem;
+  border-radius: var(--radius-sm);
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.master-meter-fill {
+  position: absolute;
+  inset: 0;
+  width: 0%;
+  background: var(--accent-teal-dim);
+  transition: background-color 0.15s;
 }
 
 button {
@@ -443,6 +476,30 @@ input[type="range"]:disabled::-webkit-slider-thumb {
 
 .row-master {
   justify-content: space-between;
+  /* Overridden per source type below -- a plain border here (rather than
+   * omitting it) keeps every row-master's own text from shifting by the
+   * stripe's width once a source-* class applies its color. */
+  border-left: 3px solid var(--border);
+}
+
+.row-master.source-samplePlayer {
+  border-left-color: var(--source-samplePlayer);
+}
+
+.row-master.source-oscillatorSynth {
+  border-left-color: var(--source-oscillatorSynth);
+}
+
+.row-master.source-fmSynth {
+  border-left-color: var(--source-fmSynth);
+}
+
+.row-master.source-noiseGenerator {
+  border-left-color: var(--source-noiseGenerator);
+}
+
+.row-master.source-granularSynth {
+  border-left-color: var(--source-granularSynth);
 }
 
 .row-master-name {
