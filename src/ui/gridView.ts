@@ -1567,6 +1567,48 @@ export function effectsFields(
     },
   });
 
+  if (effects.length > 0) {
+    fields.push({
+      // Fresh random value per param, within whatever range is currently
+      // active for it (activeRangeFor -- a per-instance custom range if
+      // one's set, else the table default) -- reusing the exact same
+      // bounds Drift already wanders within, so "reroll" can never jump
+      // further than a user-set custom range already allows. Unlike
+      // more-like-this's small nudges, this also re-picks each select
+      // param (e.g. filter type) since a full reroll is meant to be a
+      // bigger jump, not a nudge.
+      key: "reroll-chain",
+      label: "Reroll chain",
+      kind: "button",
+      onClick: () => {
+        const current = getEffects();
+        onUpdate(
+          current.map((spec) => {
+            const table = EFFECT_TABLE.find((e) => e.type === spec.type);
+            if (!table) return spec;
+            const nextParams: Record<string, number | string> = {
+              ...spec.params,
+            };
+            for (const param of table.params) {
+              if (param.kind === "select") {
+                nextParams[param.key] =
+                  param.options[
+                    Math.floor(Math.random() * param.options.length)
+                  ];
+              } else {
+                const active = activeRangeFor(spec, param);
+                const display =
+                  active.min + Math.random() * (active.max - active.min);
+                nextParams[param.key] = display / (param.scale ?? 1);
+              }
+            }
+            return { ...spec, params: nextParams };
+          }),
+        );
+      },
+    });
+  }
+
   if (effects.length > 0 && onSaveAsPreset) {
     fields.push({
       key: "save-chain-preset",
@@ -1985,6 +2027,18 @@ function openInstrumentModal(
     if (current) model.previewRow(current);
   });
   footer.appendChild(previewButton);
+  if (row.source.needsSample && options.onSwapSample) {
+    const swapButton = document.createElement("button");
+    swapButton.textContent = "Swap sample";
+    swapButton.title = "Assign a random other sample from the same category";
+    swapButton.addEventListener("click", async () => {
+      const current = model.getRow(row.id);
+      if (!current) return;
+      await options.onSwapSample?.(current);
+      renderBody();
+    });
+    footer.appendChild(swapButton);
+  }
   const savePresetButton = document.createElement("button");
   savePresetButton.textContent = "Save as instrument preset…";
   savePresetButton.addEventListener("click", () => {
@@ -2293,6 +2347,11 @@ export interface GridViewOptions {
    * selects it afterward via selectRow so the new copy is what's open
    * for editing next, not left on the original. */
   onDuplicateRow?: (row: Row) => Promise<void>;
+  /** Instrument popup's "Swap sample" button (samplePlayer rows only) --
+   * this file has no notion of the sample library itself (see
+   * getCurrentSampleName's own doc), so main.ts picks a random other
+   * sample sharing the row's current category and assigns it. */
+  onSwapSample?: (row: Row) => Promise<void>;
 }
 
 export interface GridViewHandle {
@@ -2326,6 +2385,16 @@ export interface GridViewHandle {
     getEffects: () => EffectSpec[];
     setEffects: (next: EffectSpec[]) => void;
   } | null;
+  /** Nudges every row's own knobs (defaults, pan/level/send, effect
+   * params), a fraction of each row's steps, and the master/send-bus
+   * chains -- all a little, all at once, from wherever they currently
+   * sit (not fresh random draws) -- see its own doc above
+   * createGridView's return statement for exactly what moves and by how
+   * much. One click = one small step away from the current patch;
+   * clicking repeatedly wanders further, same as nothing stops clicking
+   * a "reroll" button twice. No Amount knob -- undo/redo is the walk-
+   * back mechanism instead of a dial to get right in advance. */
+  moreLikeThis(): void;
 }
 
 export function createGridView(
@@ -2578,6 +2647,29 @@ export function createGridView(
               max: 1,
               step: 0.01,
               onChange: (v) => model.setRowProbability(row, v),
+            },
+            {
+              // Shuffles which steps are on, not how many -- a Fisher-
+              // Yates permutation of this row's own on/off flags, so a
+              // busy row stays busy and a sparse one stays sparse, just
+              // rearranged. Only touches `on`; a step's own note/gain/
+              // gate/time-shift overrides (if any) stay put and travel
+              // with their column index, not with wherever their "on"
+              // flag ends up.
+              key: "rerollPattern",
+              label: "Reroll pattern",
+              kind: "button",
+              onClick: () => {
+                const current = model.getRow(row.id);
+                if (!current) return;
+                const flags = current.cells.map((c) => c.on);
+                for (let i = flags.length - 1; i > 0; i--) {
+                  const j = Math.floor(Math.random() * (i + 1));
+                  [flags[i], flags[j]] = [flags[j], flags[i]];
+                }
+                flags.forEach((on, i) => model.setCell(current, i, { on }));
+                render();
+              },
             },
           ],
         },
@@ -3130,6 +3222,88 @@ export function createGridView(
     });
   }
 
+  // A fraction of each numeric effect param's own *active* range span
+  // (activeRangeFor -- same custom-range-aware bound Drift/Reroll chain
+  // already respect), applied as a random ± delta from wherever that
+  // param currently sits, clamped back into range -- a nudge, not a
+  // fresh draw. Select params (filter type, LFO shape, ...) are left
+  // alone entirely: a "little" nudge shouldn't suddenly swap a lowpass
+  // for a highpass, unlike Reroll chain's bigger, deliberate jump.
+  const MORE_LIKE_THIS_EFFECT_NUDGE_FRACTION = 0.12;
+
+  function nudgeEffects(effects: EffectSpec[]): EffectSpec[] {
+    return effects.map((spec) => {
+      const table = EFFECT_TABLE.find((e) => e.type === spec.type);
+      if (!table) return spec;
+      const nextParams: Record<string, number | string> = { ...spec.params };
+      for (const param of table.params) {
+        if (param.kind === "select") continue;
+        const active = activeRangeFor(spec, param);
+        const span = active.max - active.min;
+        if (span <= 0) continue;
+        const scale = param.scale ?? 1;
+        const stored = spec.params[param.key];
+        const storedDisplay =
+          (typeof stored === "number" ? stored : param.default) * scale;
+        const delta =
+          (Math.random() * 2 - 1) * span * MORE_LIKE_THIS_EFFECT_NUDGE_FRACTION;
+        const nextDisplay = Math.min(
+          active.max,
+          Math.max(active.min, storedDisplay + delta),
+        );
+        nextParams[param.key] = nextDisplay / scale;
+      }
+      return { ...spec, params: nextParams };
+    });
+  }
+
+  // Same ± nudge shape as nudgeEffects above, just against each row-level
+  // scalar's own sensible span instead of an effect param's active range
+  // (rows have no per-field range concept to reuse the way effects do).
+  // Setters that already clamp internally (setRowProbability, setRowPan)
+  // are trusted to do that; the rest (no internal clamp -- see each
+  // setter's own doc for why, e.g. setRowLevel's "values outside the
+  // slider's own range are still musically meaningful") get a defensive
+  // bound here instead, generous enough that repeated clicks can't drift
+  // a value into something nonsensical (e.g. negative gain) but without
+  // re-imposing the exact slider range those setters deliberately don't.
+  function nudge(value: number, amount: number): number {
+    return value + (Math.random() * 2 - 1) * amount;
+  }
+
+  function moreLikeThis(): void {
+    for (const row of model.getRows()) {
+      const c = row.config;
+      model.setRowDefaultNote(
+        row,
+        Math.min(127, Math.max(0, Math.round(nudge(c.defaultNote, 3)))),
+      );
+      model.setRowDefaultGain(row, Math.min(1, Math.max(0, nudge(c.defaultGain, 0.12))));
+      model.setRowDefaultTimeShift(
+        row,
+        Math.min(0.1, Math.max(-0.1, nudge(c.defaultTimeShiftSeconds, 0.01))),
+      );
+      model.setRowProbability(row, nudge(c.probability, 0.15));
+      model.setRowPan(row, nudge(c.pan, 0.2));
+      model.setRowLevel(row, Math.min(2, Math.max(0, nudge(c.level, 0.12))));
+      model.setRowSendLevel(row, Math.min(1, Math.max(0, nudge(c.sendLevel, 0.12))));
+      model.setRowEffects(row, nudgeEffects(c.effects));
+
+      // A minority of steps flip -- small enough that a click or two
+      // still reads as "the same groove," large enough to actually
+      // notice; clicking repeatedly compounds toward something new.
+      row.cells.forEach((cell, i) => {
+        if (Math.random() < 0.12) model.setCell(row, i, { on: !cell.on });
+      });
+    }
+    model.setMasterGain(
+      Math.min(2, Math.max(0, nudge(model.masterGain.gain.value, 0.08))),
+    );
+    model.setMasterEffects(nudgeEffects(model.getMasterEffects()));
+    model.setSendBusEffects(nudgeEffects(model.getSendBusEffects()));
+    render();
+  }
+
   render();
   startDriftEngine(model);
   return {
@@ -3139,5 +3313,6 @@ export function createGridView(
     selectRow: (rowId) => select({ kind: "row", rowId }),
     getSelectedRow,
     getSelectedEffectsTarget,
+    moreLikeThis,
   };
 }

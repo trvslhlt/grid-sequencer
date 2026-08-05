@@ -81,6 +81,9 @@ const playStopButtonEl =
   document.querySelector<HTMLButtonElement>("#play-stop-button")!;
 const masterButtonEl =
   document.querySelector<HTMLButtonElement>("#master-button")!;
+const moreLikeThisButtonEl = document.querySelector<HTMLButtonElement>(
+  "#more-like-this-button",
+)!;
 const manageLibraryButtonEl = document.querySelector<HTMLButtonElement>(
   "#manage-library-button",
 )!;
@@ -413,6 +416,19 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
     onDuplicateRow: async (row) => {
       const newRow = await duplicateRow(model, audioContext, row, rowSampleIds);
       view.selectRow(newRow.id);
+    },
+    onSwapSample: async (row) => {
+      const currentId = rowSampleIds.get(row.id);
+      const current = availableSamples.find((s) => s.id === currentId);
+      // No current sample (still loading, or none assigned) has no
+      // "same category" to swap within -- picks among every sample
+      // instead, same fallback as landing on an unfiled row would need.
+      const candidates = availableSamples.filter(
+        (s) => s.id !== currentId && (!current || s.category === current.category),
+      );
+      if (candidates.length === 0) return;
+      const pick = candidates[Math.floor(Math.random() * candidates.length)];
+      await assignSampleToRow(row, pick.id);
     },
   });
 
@@ -1326,6 +1342,7 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
   });
 
   masterButtonEl.addEventListener("click", () => view.selectMaster());
+  moreLikeThisButtonEl.addEventListener("click", () => view.moreLikeThis());
 
   // Open book = "go look at the library"; 3x3 grid = "go back to the
   // sequencer grid" -- both drawn as inline SVG (rather than relying on a
