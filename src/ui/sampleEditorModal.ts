@@ -1,11 +1,12 @@
 /** A popup for previewing and editing a single library sample -- trimming
- * its start/end (bruit-kit's waveform range view), toggling reverse, and
- * applying an effects chain (reusing gridView.ts's own effectsFields UI),
- * all previewable live before committing anything. Trim/reverse alone stay
- * non-destructive-until-saved and can overwrite the sample in place; once
- * an effect is added, the edit becomes destructive processing baked into
- * real audio, so overwrite is disallowed and only "Save as new" remains
- * (see updateOverwriteAvailability). Pulled out of the management page's
+ * its start/end (bruit-kit's waveform range view), toggling reverse,
+ * changing playback speed, and applying an effects chain (reusing
+ * gridView.ts's own effectsFields UI), all previewable live before
+ * committing anything. Trim/reverse/speed alone stay non-destructive-
+ * until-saved and can overwrite the sample in place; once an effect is
+ * added, the edit becomes destructive processing baked into real audio,
+ * so overwrite is disallowed and only "Save as new" remains (see
+ * updateOverwriteAvailability). Pulled out of the management page's
  * per-row controls (see main.ts's renderManagementPage) so browsing
  * samples isn't cluttered with a full operations panel repeated on every
  * row; editing now happens in one place instead. */
@@ -69,6 +70,57 @@ function extractRange(
       .set(buffer.getChannelData(channel).subarray(startFrame, endFrame));
   }
   return out;
+}
+
+/** Tape/vinyl-style speed change -- playbackRate coupled to pitch. Renders
+ * through an OfflineAudioContext sized for the resulting (shorter at
+ * rate > 1, longer at rate < 1) duration, same "run the real graph faster
+ * than real time" approach renderEffectsOffline uses for effects, just
+ * with no chain in between -- a rate-shifted AudioBufferSourceNode
+ * connected straight to the destination. `speed` === 1 skips the render
+ * entirely (the common case: most edits don't touch this control) rather
+ * than round-tripping through OfflineAudioContext for a no-op. Pitch
+ * decoupled from speed (the "Preserve pitch" checkbox) isn't handled
+ * here -- see pitchCompensationSpec below, layered on afterward through
+ * the same Pitch shift effect the Effects section exposes directly. */
+async function applySpeed(
+  buffer: AudioBuffer,
+  speed: number,
+): Promise<AudioBuffer> {
+  if (speed === 1) return buffer;
+  const length = Math.max(1, Math.ceil(buffer.length / speed));
+  const offlineContext = new OfflineAudioContext(
+    buffer.numberOfChannels,
+    length,
+    buffer.sampleRate,
+  );
+  const source = offlineContext.createBufferSource();
+  source.buffer = buffer;
+  source.playbackRate.value = speed;
+  source.connect(offlineContext.destination);
+  source.start();
+  return offlineContext.startRendering();
+}
+
+/** The Pitch shift effect (same EFFECT_TABLE entry the Effects section
+ * exposes directly, see gridView.ts) tuned to exactly cancel out the
+ * pitch change `speed` alone would introduce -- doubling playback rate
+ * raises pitch by an octave (12 semitones) regardless of the original
+ * pitch, so shifting back down by 12*log2(speed) semitones (fractional,
+ * not rounded to a whole semitone -- the underlying processor accepts
+ * that fine, see bruit-kit's PitchShiftEffect.setParams) restores it
+ * while leaving the sped-up/slowed-down duration alone. Not true pitch-
+ * preserving time-stretch (no re-analysis of the audio itself) -- just
+ * speed-shift-then-shift-back, reusing the same worklet-based pitch
+ * shifter everywhere else in this app already trusts, rather than a
+ * separate time-stretch algorithm. */
+function pitchCompensationSpec(speed: number): EffectSpec[] {
+  return [
+    {
+      type: "pitchShift",
+      params: { octave: 0, semitones: -12 * Math.log2(speed), cents: 0, wet: 1 },
+    },
+  ];
 }
 
 const MAX_TAIL_SECONDS = 15;
@@ -209,17 +261,31 @@ export function openSampleEditorModal(
 
   let range: WaveformRange = { start: 0, end: 1 };
   let reversed = false;
+  let speed = 1;
+  let preservePitch = false;
   let effects: EffectSpec[] = [];
   let overwriteButtonEl: HTMLButtonElement | null = null;
 
-  // Overwrite rewrites the stored file in place -- fine for trim/reverse
-  // (still just a non-destructive edit until a save button is clicked),
-  // but once an effect is in the chain the save is genuinely destructive
-  // processing, so only "Save as new" stays available (see this file's
-  // own doc comment).
+  // Whatever pitchCompensationSpec would add on top of the user's own
+  // effects, only when it'd actually do something -- speed === 1 has no
+  // pitch to compensate, and unchecked Preserve pitch means the tape/
+  // vinyl-style pitch change is the point, not something to undo.
+  function effectsWithPitchCompensation(): EffectSpec[] {
+    return preservePitch && speed !== 1
+      ? [...pitchCompensationSpec(speed), ...effects]
+      : effects;
+  }
+
+  // Overwrite rewrites the stored file in place -- fine for trim/reverse/
+  // speed alone (still just a deterministic, non-destructive-feeling edit
+  // until a save button is clicked), but once an effect is in the chain
+  // (the user's own, or the Preserve pitch checkbox's own compensation
+  // pass through that same Pitch shift effect) the save is genuinely
+  // destructive processing, so only "Save as new" stays available (see
+  // this file's own doc comment).
   function updateOverwriteAvailability(): void {
     if (!overwriteButtonEl) return;
-    const blocked = effects.length > 0;
+    const blocked = effectsWithPitchCompensation().length > 0;
     overwriteButtonEl.disabled = blocked;
     overwriteButtonEl.title = blocked
       ? "Effects are destructive processing — save as a new sample instead"
@@ -232,9 +298,10 @@ export function openSampleEditorModal(
   }
 
   async function buildFinalBuffer(original: AudioBuffer): Promise<AudioBuffer> {
-    const working = buildWorkingBuffer(original);
-    return effects.length > 0
-      ? renderEffectsOffline(working, effects)
+    const working = await applySpeed(buildWorkingBuffer(original), speed);
+    const finalEffects = effectsWithPitchCompensation();
+    return finalEffects.length > 0
+      ? renderEffectsOffline(working, finalEffects)
       : working;
   }
 
@@ -265,19 +332,59 @@ export function openSampleEditorModal(
     reverseLabel.append(reverseCheckbox, " Reverse");
     controlsRow.appendChild(reverseLabel);
 
+    const speedLabel = document.createElement("label");
+    speedLabel.textContent = "Speed ";
+    const speedInput = document.createElement("input");
+    speedInput.type = "range";
+    // Wide enough range for a sound-experimentation tool, not just a
+    // "gentle tempo match" tweak (0.5x..2x) -- tape/vinyl-style, so
+    // pitch rides along with it in both directions.
+    speedInput.min = "0.25";
+    speedInput.max = "4";
+    speedInput.step = "0.01";
+    speedInput.value = String(speed);
+    const speedValueEl = document.createElement("span");
+    speedValueEl.className = "field-value";
+    speedValueEl.textContent = `${speed.toFixed(2)}×`;
+    speedInput.addEventListener("input", () => {
+      speed = Number(speedInput.value);
+      speedValueEl.textContent = `${speed.toFixed(2)}×`;
+    });
+    speedLabel.append(speedInput, speedValueEl);
+    controlsRow.appendChild(speedLabel);
+
+    const preservePitchLabel = document.createElement("label");
+    const preservePitchCheckbox = document.createElement("input");
+    preservePitchCheckbox.type = "checkbox";
+    preservePitchCheckbox.checked = preservePitch;
+    preservePitchCheckbox.addEventListener("change", () => {
+      preservePitch = preservePitchCheckbox.checked;
+      updateOverwriteAvailability();
+    });
+    preservePitchLabel.append(preservePitchCheckbox, " Preserve pitch");
+    controlsRow.appendChild(preservePitchLabel);
+
     const previewButton = document.createElement("button");
     previewButton.textContent = "▶ Preview";
     previewButton.addEventListener("click", () => {
       stopPreview();
       const source = audioContext.createBufferSource();
       source.buffer = buildWorkingBuffer(original);
+      // Live playbackRate, not the offline speed render -- instant
+      // audible feedback while dragging the slider, same reasoning as
+      // playing the un-rendered effects chain live below. The offline
+      // applySpeed render only actually runs when saving.
+      source.playbackRate.value = speed;
       // Live nodes, not the offline render -- immediate audible feedback
       // while dialing in effect params, same real-time chain the grid
       // itself plays rows through (see buildEffectsChain). An empty
       // `effects` array still works here: chainEffects treats it as a
       // no-op passthrough, so this path is identical to plain trim/
-      // reverse preview when no effect has been added yet.
-      const chain = buildEffectsChain(audioContext, effects);
+      // reverse preview when no effect has been added yet. Preserve
+      // pitch's own compensation is prepended the same way it is for the
+      // real offline render (effectsWithPitchCompensation), so Preview
+      // always matches what Save would actually produce.
+      const chain = buildEffectsChain(audioContext, effectsWithPitchCompensation());
       source.connect(chain.input);
       chain.output.connect(audioContext.destination);
       source.addEventListener("ended", () => {
@@ -377,7 +484,8 @@ export function openSampleEditorModal(
       const name = window.prompt("Name the new sample:", `${baseName} copy`);
       if (!name?.trim()) return;
       stopPreview();
-      statusEl.textContent = effects.length > 0 ? "Rendering…" : "Saving…";
+      statusEl.textContent =
+        effects.length > 0 || speed !== 1 ? "Rendering…" : "Saving…";
       try {
         const finalBuffer = await buildFinalBuffer(original);
         await callbacks.onSaveAsNew(finalBuffer, {
@@ -403,9 +511,10 @@ export function openSampleEditorModal(
         return;
       }
       stopPreview();
-      statusEl.textContent = "Saving…";
+      statusEl.textContent = speed !== 1 ? "Rendering…" : "Saving…";
       try {
-        await callbacks.onOverwrite(sample, buildWorkingBuffer(original), {
+        const buffer = await applySpeed(buildWorkingBuffer(original), speed);
+        await callbacks.onOverwrite(sample, buffer, {
           name: nameInput.value.trim() || sample.name,
           category: categorySelect.value,
         });

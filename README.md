@@ -362,26 +362,36 @@ make run-image-backend
   yes/no dialog can't represent three distinct outcomes without one of
   them silently doubling up as "cancel."
 - **Manage Library page** (top bar, in-app toggle — not a separate URL):
-  full CRUD for all three libraries. Samples: rename, re-categorize
-  (moves it between the tree's groups), delete, or add a brand-new local
-  file (the *only* place that happens now — see the panel above).
-  Instrument presets: rename, delete, or expand **Edit** to change its
-  saved params/envelope directly, using the same field controls a row's
-  own panel uses. Effect chain presets: rename, delete, or expand
-  **Edit** to reach the same add/remove/param controls as a row's own
-  Effects section, against a draft copy — **Save changes** commits it
-  back to the library. Deleting a sample a saved patch still references
-  doesn't break loading that patch — the row just ends up without a
-  sample instead (see Known limitations). Samples also get a
-  **Reverse** button here — permanent and destructive, rewriting the
-  stored audio file's own PCM data in place (`backend/src/
-  sampleStore.ts`'s `reverseSampleAudio`, done server-side with no
-  client round-trip since every sample this app stores is the same
-  16-bit PCM WAV shape `wavEncoder.ts` produces) — distinct from, and
-  unrelated to, a row's own non-destructive **Reverse playback**
-  checkbox below. A row that already has this sample loaded keeps
-  playing whatever it already decoded; only a fresh assignment from the
-  library picks up the reversed audio (see Known limitations).
+  full CRUD for all three libraries. Samples: click one to open the
+  **sample editor** popup (see below), or **+ Add sample…** to upload a
+  new local file (the *only* place that happens now — the sidebar Sample
+  Library panel is select-only, see the panel bullet above). Instrument
+  presets: rename, delete, or expand **Edit** to change its saved params/
+  envelope directly, using the same field controls a row's own panel
+  uses. Effect chain presets: rename, delete, or expand **Edit** to reach
+  the same add/remove/param controls as a row's own Effects section,
+  against a draft copy — **Save changes** commits it back to the
+  library. Deleting a sample a saved patch still references doesn't
+  break loading that patch — the row just ends up without a sample
+  instead (see Known limitations).
+- **Sample editor** (opened from the Manage Library page, see above): a
+  popup with a waveform trim view (drag handles), **Reverse**, **Speed**
+  (0.25×..4×, tape/vinyl-style — pitch rides along with it), a
+  **Preserve pitch** checkbox that layers the Effects section's own
+  Pitch shift effect on top, tuned to exactly cancel out whatever pitch
+  change Speed alone would introduce (`sampleEditorModal.ts`'s
+  `pitchCompensationSpec` -- shifts back down by `12 * log2(speed)`
+  semitones), so the duration change survives without the pitch coming
+  along for the ride, plus Name/Category fields and the same destructive
+  Effects section as a row's own. **▶ Preview** auditions trim/reverse/
+  speed/pitch/effects together live before committing anything.
+  Trim/reverse/speed alone stay non-destructive-feeling and can **Save
+  (overwrite)** the sample in place, renaming/re-categorizing it too;
+  once an effect is added (or Preserve pitch is checked, which routes
+  through that same effect machinery), the edit is destructive
+  processing baked into real audio, so only **Save as new…** stays
+  available. **Delete** removes the sample from the library entirely
+  (confirmed first).
 - **Reverse playback** (sample rows only, row panel, next to
   "Playback"): a non-destructive playback-direction flip, toggleable any
   time — before or after a sample's assigned, mid-session, whatever.
