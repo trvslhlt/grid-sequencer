@@ -1,6 +1,6 @@
-import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { createJsonRecordStore } from "./jsonRecordStore.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const EFFECT_CHAIN_PRESETS_DIR = path.join(
@@ -21,60 +21,12 @@ export interface EffectChainPreset {
   createdAt: string;
 }
 
-export async function ensureEffectChainPresetsDir(): Promise<void> {
-  await fs.mkdir(EFFECT_CHAIN_PRESETS_DIR, { recursive: true });
-}
+const store = createJsonRecordStore<EffectChainPreset>(
+  EFFECT_CHAIN_PRESETS_DIR,
+);
 
-async function readPresetFile(id: string): Promise<EffectChainPreset | null> {
-  try {
-    const raw = await fs.readFile(
-      path.join(EFFECT_CHAIN_PRESETS_DIR, `${id}.json`),
-      "utf-8",
-    );
-    return JSON.parse(raw) as EffectChainPreset;
-  } catch {
-    return null;
-  }
-}
-
-export async function listEffectChainPresets(): Promise<EffectChainPreset[]> {
-  let entries: string[];
-  try {
-    entries = await fs.readdir(EFFECT_CHAIN_PRESETS_DIR);
-  } catch {
-    return [];
-  }
-
-  const presets: EffectChainPreset[] = [];
-  for (const entryName of entries) {
-    if (!entryName.endsWith(".json")) continue;
-    const id = entryName.slice(0, -".json".length);
-    const preset = await readPresetFile(id);
-    if (preset) presets.push(preset);
-  }
-  return presets;
-}
-
-export async function readEffectChainPreset(
-  id: string,
-): Promise<EffectChainPreset | null> {
-  return readPresetFile(id);
-}
-
-export async function writeEffectChainPreset(
-  preset: EffectChainPreset,
-): Promise<void> {
-  await fs.writeFile(
-    path.join(EFFECT_CHAIN_PRESETS_DIR, `${preset.id}.json`),
-    JSON.stringify(preset, null, 2),
-  );
-}
-
-export async function deleteEffectChainPreset(id: string): Promise<boolean> {
-  try {
-    await fs.unlink(path.join(EFFECT_CHAIN_PRESETS_DIR, `${id}.json`));
-    return true;
-  } catch {
-    return false;
-  }
-}
+export const ensureEffectChainPresetsDir = store.ensureDir;
+export const listEffectChainPresets = store.list;
+export const readEffectChainPreset = store.read;
+export const writeEffectChainPreset = store.write;
+export const deleteEffectChainPreset = store.remove;

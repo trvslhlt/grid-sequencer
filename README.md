@@ -505,6 +505,9 @@ src/
   patch.ts               GridModel live state <-> plain-JSON patch (serializePatch/applyPatch)
   patchApi.ts             fetch wrappers for /api/patches + /api/samples +
                             /api/instrument-presets + /api/effect-chain-presets
+  undoHistory.ts          generic snapshot-stack undo/redo (createUndoHistory) -- not audio-
+                            specific, kept here rather than bruit-kit since it's app-state
+                            infrastructure, not a toolkit-scoped concern
   grid/
     config.ts             cascade config types + resolveCellConfig (cell > row/column > built-in)
     scale.ts               global key/scale quantizeToScale, applied above the cascade in fireTick
@@ -512,13 +515,15 @@ src/
                             PARAM_FIELDS_BY_SOURCE_TYPE (per-type param metadata,
                             usable without a live AudioContext -- the preset editor)
     triggerModes.ts        maps trigger-mode choice -> SamplePlayer params + TrackStep.gate
-    effectsChain.ts        builds + ref-count-caches persistent effect chains
     gridModel.ts            the sequencer engine: shared clock, per-row/column/cell state, firing logic
+    driftEngine.ts           GridModel-coupled orchestration for EffectSpec.drift -- wanders a
+                              drifting param's live value via bruit-kit's own pacing math
+                              (retargetDelayMsFor/lerpFactorFor), pushed through
+                              GridModel.applyLiveEffectParam
   ui/
     gridView.ts             grid + selection config panel, click/right-click wiring;
-                              effectsFields (modular add/remove effect chain, shared by
-                              row/cell/master) and getSelectedEffectsTarget
-    fields.ts                 form-field renderer shared by every panel kind (no popup)
+                              drag-paint toggling (bruit-kit's createDragPaint) and the
+                              row/cell/master Effects sections (bruit-kit's effectsFields)
     libraryTree.ts             collapsible-by-group list, shared by the main-page
                                 Sample/Instrument/Effect panels and the management page
 public/worklets/
@@ -529,12 +534,18 @@ backend/                 Express + TypeScript storage for patches/samples/preset
   src/
     server.ts              wires the four routers, ensures patches/samples/instrumentPresets/
                               effectChainPresets exist
-    patchStore.ts            one JSON file per patch, keyed by id
+    jsonRecordStore.ts       generic createJsonRecordStore<T> (ensureDir/list/read/write/remove
+                                over a directory of `<id>.json` files) -- instrumentPresetStore.ts
+                                and effectChainPresetStore.ts are both now thin wrappers around
+                                this shared factory instead of duplicating the same fs logic
+    patchStore.ts            one JSON file per patch, keyed by id -- own hand-rolled fs logic,
+                                not on jsonRecordStore.ts (also projects a name-searchable
+                                summary list, which the generic factory doesn't need to know about)
     sampleStore.ts           sidecar JSON + binary file per uploaded sample;
                                reverseSampleAudio reverses a WAV's own PCM
                                data in place, server-side, no decode needed
-    instrumentPresetStore.ts one JSON file per preset, keyed by id
-    effectChainPresetStore.ts one JSON file per saved effect chain, keyed by id
+    instrumentPresetStore.ts one JSON file per preset, keyed by id (via jsonRecordStore.ts)
+    effectChainPresetStore.ts one JSON file per saved effect chain, keyed by id (via jsonRecordStore.ts)
     routes/
       patches.ts              list/get/save, name uniqueness, "demo" protection
       samples.ts               list/upload (multer)/stream-by-id/rename-recategorize/

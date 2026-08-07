@@ -1,12 +1,15 @@
 import "bruit-kit/ui/automationEditor.css";
 import "bruit-kit/ui/waveformRangeView.css";
 import {
+  type EffectSpec,
   Recorder,
+  createPeakMeter,
   preloadPitchShiftWorklet,
   preloadSampleRateReducerWorklet,
 } from "bruit-kit/audio";
+import { type Field, effectsFields, renderFields } from "bruit-kit/ui";
 import { getSharedLimiter, unlockAudioContext } from "./audioContext";
-import type { EffectSpec, Precedence } from "./grid/config";
+import type { Precedence } from "./grid/config";
 import { GridModel, type Row } from "./grid/gridModel";
 import { KEY_LABELS, SCALE_LABELS, type ScaleType } from "./grid/scale";
 import {
@@ -48,12 +51,8 @@ import {
   uploadSample,
 } from "./patchApi";
 import { generateBlipBuffer } from "./sampleGen";
-import { type Field, renderFields } from "./ui/fields";
-import {
-  type PanelSection,
-  createGridView,
-  effectsFields,
-} from "./ui/gridView";
+import { createUndoHistory } from "./undoHistory";
+import { type PanelSection, createGridView } from "./ui/gridView";
 import { type TreeGroup, renderLibraryTree } from "./ui/libraryTree";
 import { openPatchModal } from "./ui/patchModal";
 import { openSampleEditorModal } from "./ui/sampleEditorModal";
@@ -246,7 +245,7 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
   const meterAnalyser = audioContext.createAnalyser();
   meterAnalyser.fftSize = 512;
   limiter.output.connect(meterAnalyser);
-  const meterBuffer = new Float32Array(meterAnalyser.fftSize);
+  const peakMeter = createPeakMeter(meterAnalyser);
   // dB range the meter's own width maps across -- -48dB (near-silent) at
   // empty, 0dB (unity, right at the limiter's own ceiling territory) at
   // full. Color bands (not the width mapping) are what actually signal
@@ -254,13 +253,7 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
   // ceiling exactly.
   const METER_MIN_DB = -48;
   function updateMasterMeter(): void {
-    meterAnalyser.getFloatTimeDomainData(meterBuffer);
-    let peak = 0;
-    for (const sample of meterBuffer) {
-      const abs = Math.abs(sample);
-      if (abs > peak) peak = abs;
-    }
-    const db = peak > 0 ? 20 * Math.log10(peak) : Number.NEGATIVE_INFINITY;
+    const db = peakMeter.readPeakDb();
     const fraction = Math.min(
       1,
       Math.max(0, (db - METER_MIN_DB) / (0 - METER_MIN_DB)),
@@ -374,8 +367,9 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
             model.setMasterEffects(next);
             view.render();
           },
+          (next) => model.setMasterEffects(next),
           saveEffectChainPreset,
-          { kind: "master" },
+          true,
         ),
       },
       {
@@ -386,8 +380,9 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
             model.setSendBusEffects(next);
             view.render();
           },
+          (next) => model.setSendBusEffects(next),
           saveEffectChainPreset,
-          { kind: "sendBus" },
+          true,
         ),
       },
     ];
@@ -634,6 +629,10 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
             draftEffects.length = 0;
             draftEffects.push(...next);
             renderDraftFields();
+          },
+          (next) => {
+            draftEffects.length = 0;
+            draftEffects.push(...next);
           },
         ),
       );
@@ -1045,50 +1044,18 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
 
   // Undo/redo -- a history of the exact same full-snapshot string
   // currentSnapshot() already produces for dirty-tracking above, not a
-  // per-field command log. Same reasoning as that doc: this app has
-  // dozens of mutation sites (many entirely internal to gridView.ts's own
-  // closure), so a snapshot comparison that can't miss one beats hooking
-  // every call site individually. Polled on its own faster interval
-  // (dirty-tracking's 1s is imperceptible for "is there unsaved work,"
-  // but undo wants to distinguish two separate edits made close together,
-  // not merge them into one step). Session-only, same as most editors'
-  // undo history resets on File > Open: resetUndoHistory() runs alongside
-  // every markSaved() call site below (initial load, Load, New), since
-  // undoing back into a patch you've since navigated away from would be
-  // more confusing than useful.
-  const UNDO_HISTORY_LIMIT = 100;
-  let undoStack: string[] = [];
-  let redoStack: string[] = [];
-  // Set only while performUndo/performRedo's own restoreSnapshot call is
-  // in flight, so the interval poll below doesn't see the state it just
-  // restored as a brand new edit and immediately push it back onto the
-  // stack it was popped from.
-  let isRestoringHistory = false;
-
-  function resetUndoHistory(): void {
-    undoStack = [currentSnapshot()];
-    redoStack = [];
-    updateUndoButtons();
-  }
-
-  function checkpointUndoHistory(): void {
-    if (isRestoringHistory) return;
-    const snapshot = currentSnapshot();
-    if (snapshot === undoStack[undoStack.length - 1]) return;
-    undoStack.push(snapshot);
-    if (undoStack.length > UNDO_HISTORY_LIMIT) undoStack.shift();
-    redoStack = [];
-    updateUndoButtons();
-  }
-
-  function updateUndoButtons(): void {
-    undoButtonEl.disabled = undoStack.length < 2;
-    redoButtonEl.disabled = redoStack.length === 0;
-  }
-
-  async function restoreHistoryEntry(snapshotJson: string): Promise<void> {
-    isRestoringHistory = true;
-    try {
+  // per-field command log (see undoHistory.ts's own doc for why polling a
+  // serialized snapshot beats hooking every mutation site). Polled on its
+  // own faster interval (dirty-tracking's 1s is imperceptible for "is
+  // there unsaved work," but undo wants to distinguish two separate edits
+  // made close together, not merge them into one step). Session-only, same
+  // as most editors' undo history resets on File > Open: history.reset()
+  // runs alongside every markSaved() call site below (initial load, Load,
+  // New), since undoing back into a patch you've since navigated away
+  // from would be more confusing than useful.
+  const history = createUndoHistory({
+    serialize: currentSnapshot,
+    restore: async (snapshotJson) => {
       const snapshot = JSON.parse(snapshotJson) as PatchSnapshot;
       applyTempoState(
         await restoreSnapshot(model, audioContext, snapshot, rowSampleIds),
@@ -1097,36 +1064,15 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
       view.render();
       renderLibraryPanels();
       updateDirtyState();
-    } finally {
-      isRestoringHistory = false;
-    }
-    updateUndoButtons();
-  }
+    },
+    onChange: ({ canUndo, canRedo }) => {
+      undoButtonEl.disabled = !canUndo;
+      redoButtonEl.disabled = !canRedo;
+    },
+  });
 
-  // The isRestoringHistory guard here (not just inside restoreHistoryEntry)
-  // matters for reentrancy: a rapid double-click, or a held Cmd+Z's own key
-  // repeat, would otherwise fire this again while the first call's own
-  // restoreHistoryEntry is still awaiting restoreSnapshot -- two overlapping
-  // pop/push pairs against the same stacks would corrupt the history, not
-  // just double-apply a restore.
-  async function performUndo(): Promise<void> {
-    if (isRestoringHistory || undoStack.length < 2) return;
-    const current = undoStack.pop();
-    if (current === undefined) return;
-    redoStack.push(current);
-    await restoreHistoryEntry(undoStack[undoStack.length - 1]);
-  }
-
-  async function performRedo(): Promise<void> {
-    if (isRestoringHistory) return;
-    const next = redoStack.pop();
-    if (next === undefined) return;
-    undoStack.push(next);
-    await restoreHistoryEntry(next);
-  }
-
-  undoButtonEl.addEventListener("click", () => void performUndo());
-  redoButtonEl.addEventListener("click", () => void performRedo());
+  undoButtonEl.addEventListener("click", () => void history.undo());
+  redoButtonEl.addEventListener("click", () => void history.redo());
 
   // Ctrl+Z / Cmd+Z (undo) and Shift+Ctrl+Z / Shift+Cmd+Z (redo) -- ignored
   // while focus is in a text-editing control so this doesn't hijack that
@@ -1143,8 +1089,8 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
       return;
     }
     event.preventDefault();
-    if (event.shiftKey) void performRedo();
-    else void performUndo();
+    if (event.shiftKey) void history.redo();
+    else void history.undo();
   });
 
   // The "demo" patch is what loads by default -- seeded into the backend
@@ -1271,7 +1217,7 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
     currentPatchName = demo.name;
     markSaved();
   }
-  resetUndoHistory();
+  history.reset();
   await refreshAvailablePatches();
   await refreshAvailableSamples();
   await refreshInstrumentPresets();
@@ -1279,7 +1225,6 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
   view.render();
   renderLibraryPanels();
   patchButtonEl.disabled = false;
-  updateUndoButtons();
 
   // Polling, not a hook on every mutation -- see markSaved/updateDirtyState's
   // own doc for why. beforeunload is the browser-native "uncompleted
@@ -1287,9 +1232,9 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
   // ignoring whatever's assigned to returnValue -- every modern browser
   // does this deliberately, to stop sites spamming a custom message).
   setInterval(updateDirtyState, 1000);
-  // Faster than the dirty-check poll -- see checkpointUndoHistory's own
-  // doc for why undo wants finer granularity than "is there unsaved work."
-  setInterval(checkpointUndoHistory, 350);
+  // Faster than the dirty-check poll -- see undoHistory.ts's own doc for
+  // why undo wants finer granularity than "is there unsaved work."
+  setInterval(history.checkpoint, 350);
   window.addEventListener("beforeunload", (event) => {
     if (!isDirty) return;
     event.preventDefault();
@@ -1337,7 +1282,7 @@ unlockAudioContext(unlockEl).then(async (audioContext) => {
         syncTopBarFromModel();
         currentPatchName = patchData.name;
         markSaved();
-        resetUndoHistory();
+        history.reset();
         view.render();
         renderLibraryPanels();
       },

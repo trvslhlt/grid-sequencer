@@ -4,12 +4,8 @@
  * loadCreation split for the same reason: one function walks live state
  * into JSON, the other tears down and rebuilds live state from JSON. */
 
-import type {
-  CellConfig,
-  ColumnConfig,
-  EffectSpec,
-  EnvelopeParams,
-} from "./grid/config";
+import type { EffectSpec } from "bruit-kit/audio";
+import type { CellConfig, ColumnConfig, EnvelopeParams } from "./grid/config";
 import type { GridModel, Row } from "./grid/gridModel";
 import type { SourceType } from "./grid/sourceFactory";
 import type { TriggerMode } from "./grid/triggerModes";

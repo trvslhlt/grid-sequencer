@@ -10,7 +10,7 @@
  * once that happens. */
 
 import type { PatchSummary } from "../patchApi";
-import { type Field, renderFields } from "./fields";
+import { type Field, renderFields } from "bruit-kit/ui";
 
 export interface PatchModalCallbacks {
   onSave: (
